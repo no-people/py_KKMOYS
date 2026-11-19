@@ -13,6 +13,7 @@ EMPTY = {
     "members": [],      # {"name", "joined", "left"}
     "expenses": [],     # {"id", "date", "payer", "amount", "members", "category", "memo"}
     "next_id": 1,
+    "locks": [],        # {"start", "end"} 정산 확정 기간(양 끝 포함). 기능 4
 }
 
 

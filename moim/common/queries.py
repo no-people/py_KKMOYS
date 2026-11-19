@@ -56,4 +56,7 @@ def member_shares(store, start, end):
 
 def is_locked(store, on):
     """정산이 확정된 기간에 속하는 날짜인가. 담당: 기능 4"""
-    raise NotImplementedError("기능 4 담당이 구현한다")
+    for lock in store.data.get("locks", []):
+        if dates.in_period(on, lock["start"], lock["end"]):
+            return True
+    return False
