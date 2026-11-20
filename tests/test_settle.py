@@ -44,3 +44,34 @@ class IsLockedTest(StoreCase):
     def test_bad_date_raises(self):
         with self.assertRaises(ValueError):
             queries.is_locked(self.store, "2026-11-31")
+
+
+class WeightsFormatTest(StoreCase):
+    """지출 한 건의 weights 항목: {참여자 전원의 이름: 1 이상 정수 비율} 또는 None(균등). 공통모듈_함수규격.md "지출 한 건의 형식"."""
+
+    def _expense(self, eid, weights="없음"):
+        e = {"id": eid, "date": "2026-11-12", "payer": "김민수", "amount": 101,
+             "members": ["김민수", "이서연", "박지훈"], "category": None, "memo": ""}
+        if weights != "없음":
+            e["weights"] = weights
+        return e
+
+    def test_weights_saved_and_loaded_as_int_dict(self):
+        self.store.data["expenses"].append(self._expense(1, {"김민수": 2, "이서연": 1, "박지훈": 1}))
+        self.store.save()
+        e = Store(self.store.path).load().get_expense(1)
+        self.assertEqual(e["weights"], {"김민수": 2, "이서연": 1, "박지훈": 1})
+        self.assertTrue(all(type(w) is int for w in e["weights"].values()))
+
+    def test_none_weights_kept_as_none(self):
+        self.store.data["expenses"].append(self._expense(1, None))
+        self.store.save()
+        self.assertIsNone(Store(self.store.path).load().get_expense(1)["weights"])
+
+    def test_old_expense_without_weights_reads_as_none(self):
+        # weights 가 생기기 전의 옛 자료 파일: 읽는 쪽은 e.get("weights") 로 None(균등)을 얻는다
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [self._expense(1)], "next_id": 2}, f)
+        e = Store(self.path("old.json")).load().get_expense(1)
+        self.assertNotIn("weights", e)
+        self.assertIsNone(e.get("weights"))

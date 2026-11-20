@@ -11,7 +11,8 @@ import os
 
 EMPTY = {
     "members": [],      # {"name", "joined", "left"}
-    "expenses": [],     # {"id", "date", "payer", "amount", "members", "category", "memo"}
+    "expenses": [],     # {"id", "date", "payer", "amount", "members", "weights", "category", "memo"}
+                        # weights: {참여자 전원의 이름: 1 이상 정수 비율} 또는 None(균등). 없는 옛 지출은 None 으로 본다. 기능 4
     "next_id": 1,
     "locks": [],        # {"start", "end"} 정산 확정 기간(양 끝 포함). 기능 4
 }
