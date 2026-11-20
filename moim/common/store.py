@@ -8,13 +8,17 @@ save·backups·recover 는 팀 공동 작업 "자료 파일 손상 대응" 담�
 import copy
 import json
 import os
+from datetime import datetime
 
 EMPTY = {
     "members": [],      # {"name", "joined", "left"}
-    "expenses": [],     # {"id", "date", "payer", "amount", "members", "weights", "category", "memo"}
+    "expenses": [],     # {"id", "date", "payer", "amount", "members", "weights", "category", "memo",
+                        #  "deleted", "recurring_id", "category_fixed"}
                         # weights: {참여자 전원의 이름: 1 이상 정수 비율} 또는 None(균등). 없는 옛 지출은 None 으로 본다. 기능 4
+                        # deleted: 삭제 표시 bool. 없는 옛 지출은 False 로 본다. 기능 1
     "next_id": 1,
     "locks": [],        # {"start", "end"} 정산 확정 기간(양 끝 포함). 기능 4
+    "history": [],      # {"id", "action", "before", "after", "at"} 지출 변경 이력. 기능 1
 }
 
 
@@ -76,3 +80,13 @@ class Store:
             if m["name"] == name:
                 return m
         return None
+
+    def record(self, action, eid, before, after):
+        """지출 변경 이력을 history 에 추가한다. before·after 는 deepcopy 로 보관한다."""
+        self.data["history"].append({
+            "id": eid,
+            "action": action,
+            "before": copy.deepcopy(before),
+            "after": copy.deepcopy(after),
+            "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
