@@ -12,10 +12,10 @@ from datetime import datetime
 
 EMPTY = {
     "members": [],      # {"name", "joined", "left"}
-    "expenses": [],     # {"id", "date", "payer", "amount", "members", "weights", "category", "memo",
-                        #  "deleted", "recurring_id", "category_fixed"}
+    "expenses": [],     # {"id", "date", "payer", "amount", "members", "weights", "category", "memo", "deleted", "recurring_id"}
                         # weights: {참여자 전원의 이름: 1 이상 정수 비율} 또는 None(균등). 없는 옛 지출은 None 으로 본다. 기능 4
                         # deleted: 삭제 표시 bool. 없는 옛 지출은 False 로 본다. 기능 1
+                        # recurring_id: 반복 지출(recurring)로 만든 지출이면 그 반복 지출의 id, 직접 넣은 지출은 None. 없는 옛 지출은 None 으로 본다. 기능 4
     "next_id": 1,
     "locks": [],        # {"start", "end"} 정산 확정 기간(양 끝 포함). 기능 4
     "history": [],      # {"id", "action", "before", "after", "at"} 지출 변경 이력. 기능 1
@@ -82,7 +82,12 @@ class Store:
         return None
 
     def record(self, action, eid, before, after):
-        """지출 변경 이력을 history 에 추가한다. before·after 는 deepcopy 로 보관한다."""
+        """지출 변경 이력을 history 에 추가한다. before·after 는 deepcopy 로 보관한다. 저장은 하지 않는다."""
+        history = self.data.get("history")
+        if history is None:   # 옛 파일의 "history": null 이나 키가 없는 경우
+            self.data["history"] = []
+        elif not isinstance(history, list):
+            raise ValueError("자료 파일의 history 형식이 잘못되었습니다")
         self.data["history"].append({
             "id": eid,
             "action": action,
