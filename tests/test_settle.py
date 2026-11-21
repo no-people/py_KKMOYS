@@ -157,6 +157,23 @@ class IsLockedTest(StoreCase):
         with self.assertRaises(ValueError):
             queries.is_locked(self.store, "2026-11-31")
 
+    def test_bad_date_raises_without_locks(self):
+        # 확정 기간이 비어 있어도 없는 날짜·형식이 틀린 날짜는 False 가 아니라 ValueError
+        self.store.data["locks"] = []
+        for bad in ("2026-11-31", "2026-02-29", "2026/11/15", "", None):
+            with self.assertRaises(ValueError):
+                queries.is_locked(self.store, bad)
+
+    def test_bad_date_raises_with_locks_null(self):
+        self.store.data["locks"] = None
+        with self.assertRaises(ValueError):
+            queries.is_locked(self.store, "2026-11-31")
+
+    def test_date_object_accepted(self):
+        import datetime as dt
+        self.assertTrue(queries.is_locked(self.store, dt.date(2026, 11, 30)))
+        self.assertFalse(queries.is_locked(self.store, dt.date(2026, 12, 1)))
+
 
 class WeightsFormatTest(StoreCase):
     """지출 한 건의 weights 항목: {참여자 전원의 이름: 1 이상 정수 비율} 또는 None(균등). 공통모듈_함수규격.md "지출 한 건의 형식"."""
