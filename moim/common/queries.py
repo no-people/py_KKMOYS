@@ -55,17 +55,33 @@ def active_members(store, on):
 
 def expense_shares(e):
     """지출 하나의 사람별 부담액. 담당: 기능 4"""
-    raise NotImplementedError("기능 4 담당이 구현한다")
+    # 규약 2 "money.split 하나로 나눈다". weights 가 없는 옛 지출은 None(균등)
+    return money.split(e["amount"], e["members"], e["payer"], e.get("weights"))
 
 
 def member_shares(store, start, end):
     """기간 동안 사람마다 부담할 돈 합계. 담당: 기능 4"""
-    raise NotImplementedError("기능 4 담당이 구현한다")
+    start, end = dates.parse(start), dates.parse(end)   # 지출이 없어도 잘못된 날짜는 ValueError
+    totals = {}
+    for e in expenses_in(store, start, end):   # 기간 양 끝 포함, 삭제 표시 제외 (규격 3-9)
+        try:
+            shares = expense_shares(e)
+        except (KeyError, TypeError, ValueError) as exc:   # 깨진 지출은 번호를 붙여 이유를 알린다 (규격 0장 오류 약속)
+            raise ValueError(f"{e.get('id')}번 지출을 나눌 수 없습니다: {exc}") from None
+        for name, won in shares.items():
+            totals[name] = totals.get(name, 0) + won
+    return totals
 
 
 def is_locked(store, on):
     """정산이 확정된 기간에 속하는 날짜인가. 담당: 기능 4"""
-    for lock in store.data.get("locks", []):
-        if dates.in_period(on, lock["start"], lock["end"]):
+    day = dates.parse(on)   # 확정 기간이 없어도 잘못된 날짜는 ValueError (규격 0장 오류 약속)
+    locks = store.data.get("locks")
+    if locks is None:   # 옛 파일의 "locks": null 이나 키가 없는 경우 (Store.record 의 history 처리와 같은 방식)
+        locks = []
+    elif not isinstance(locks, list):   # 깨진 자료를 "확정 없음"으로 넘기면 규약 6 보호가 풀리므로 거부
+        raise ValueError("자료 파일의 locks 형식이 잘못되었습니다")
+    for lock in locks:
+        if dates.in_period(day, lock["start"], lock["end"]):
             return True
     return False
