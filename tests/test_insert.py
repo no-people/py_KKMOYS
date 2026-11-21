@@ -47,6 +47,12 @@ class TestAdd(InsertCase):
     def test_tuple_members_stored_as_list(self):
         self.assertEqual(insert(self.store, "2026-11-12", KIM, 2000, (KIM, LEE))["members"], [KIM, LEE])
 
+    def test_category_given_not_fixed(self):
+        """규격 0장: 분류를 넣어도 category_fixed 는 False(고정은 set_category 만)."""
+        e = insert(self.store, "2026-11-12", KIM, 9000, [KIM], category="식비")
+        self.assertEqual((e["category"], e["category_fixed"]), ("식비", False))
+        self.assertIs(self.store.data["history"][-1]["after"]["category_fixed"], False)
+
     def test_extra_fields_and_action(self):
         """기능 4·5·6 이 넘기는 action·recurring_id·category·weights 가 그대로 남아야 한다."""
         e = insert(self.store, "2026-11-12", KIM, 3000, [KIM, LEE], memo="정기 대관료",
