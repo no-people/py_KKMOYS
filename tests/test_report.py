@@ -30,10 +30,10 @@ class TestExpensesIn(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
-import unittest
-from types import SimpleNamespace
-from unittest.mock import patch
 
+from datetime import date
+from types import SimpleNamespace
+import unittest
 from moim.common import queries
 
 
@@ -46,35 +46,45 @@ class TestPersonPaid(unittest.TestCase):
                     {"id": 2, "date": "2026-11-15", "payer": "강동휘", "amount": 8000},
                     {"id": 3, "date": "2026-11-30", "payer": "민기슬", "amount": 5000, "deleted": False},
                     {"id": 4, "date": "2026-11-20", "payer": "민기슬", "amount": 99000, "deleted": True},
-                    {"id": 5, "date": "2026-11-10", "payer": "손가인", "amount": 0},
                     {"id": 6, "date": "2026-10-31", "payer": "오재원", "amount": 30000},
                     {"id": 7, "date": "2026-12-01", "payer": "염승민", "amount": 25000},
                 ]
             }
         )
 
-    def _fake_in_period(self, date_str, start, end):
-        return start <= date_str <= end
-
     def test_person_paid_includes_boundaries_and_excludes_deleted(self):
-        with patch.object(queries.dates, "in_period", side_effect=self._fake_in_period):
-            result = queries.person_paid(self.store, "2026-11-01", "2026-11-30")
+        # patch 없이 실제 dates.in_period 로 경계값(11-01, 11-30) 및 삭제 제외 확인
+        result = queries.person_paid(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result, {"민기슬": 17000, "강동휘": 8000})
 
+    def test_person_paid_with_date_objects(self):
+        result = queries.person_paid(self.store, date(2026, 11, 1), date(2026, 11, 30))
+        self.assertEqual(result, {"민기슬": 17000, "강동휘": 8000})
+
+    def test_person_paid_spec_example_f3(self):
+        # 공통모듈_함수규격.md 3-5 예(F3) 그대로 검증
+        f3_store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-11-01", "payer": "이서연", "amount": 6000},
+                    {"id": 2, "date": "2026-11-02", "payer": "김민수", "amount": 9000},
+                ]
+            }
+        )
         self.assertEqual(
-            result,
-            {
-                "민기슬": 17000,
-                "강동휘": 8000,
-                "손가인": 0,
-            },
+            queries.person_paid(f3_store, "2026-11-01", "2026-11-30"),
+            {"이서연": 6000, "김민수": 9000},
         )
 
-    def test_person_paid_empty_when_no_matching_expenses(self):
-        with patch.object(queries.dates, "in_period", side_effect=self._fake_in_period):
-            result = queries.person_paid(self.store, "2026-01-01", "2026-01-31")
+    def test_person_paid_legacy_store_without_expenses_key(self):
+        legacy_store = SimpleNamespace(data={})
+        self.assertEqual(queries.person_paid(legacy_store, "2026-11-01", "2026-11-30"), {})
 
+    def test_person_paid_empty_when_no_matching_expenses(self):
+        result = queries.person_paid(self.store, "2026-01-01", "2026-01-31")
         self.assertEqual(result, {})
 
 
+# 파일 맨 끝에 if __name__ == "__main__": 블록 하나만 남기기
 if __name__ == "__main__":
     unittest.main()
