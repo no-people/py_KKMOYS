@@ -63,7 +63,21 @@ def next_month(year, month):
 
 def months_between(start_ym, end_ym):
     """(y,m) 부터 (y,m) 까지 달 목록. 둘 다 포함."""
-    raise NotImplementedError("기능 5 담당이 구현한다")
+    start_year, start_month = start_ym
+    end_year, end_month = end_ym
+    # 기존 날짜 처리와 같은 범위의 실제 연·월인지 먼저 확인한다.
+    dt.date(start_year, start_month, 1)
+    dt.date(end_year, end_month, 1)
+    current = (start_year, start_month)
+    end = (end_year, end_month)
+    if current > end:
+        raise ValueError("시작 달은 끝 달보다 늦을 수 없습니다")
+    months = []
+    while True:
+        months.append(current)
+        if current == end:
+            return months
+        current = next_month(*current)
 
 
 def today():
