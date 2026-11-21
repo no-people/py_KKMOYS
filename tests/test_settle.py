@@ -1,5 +1,6 @@
 """기능 4 정산 테스트. 공통 함수 queries.is_locked 와 자료 항목 locks 포함."""
 
+import datetime as dt
 import json
 
 from helpers import StoreCase
@@ -161,16 +162,21 @@ class IsLockedTest(StoreCase):
         # 확정 기간이 비어 있어도 없는 날짜·형식이 틀린 날짜는 False 가 아니라 ValueError
         self.store.data["locks"] = []
         for bad in ("2026-11-31", "2026-02-29", "2026/11/15", "", None):
-            with self.assertRaises(ValueError):
-                queries.is_locked(self.store, bad)
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    queries.is_locked(self.store, bad)
 
     def test_bad_date_raises_with_locks_null(self):
         self.store.data["locks"] = None
         with self.assertRaises(ValueError):
             queries.is_locked(self.store, "2026-11-31")
 
+    def test_leap_day_valid_without_locks(self):
+        # 윤년 2028-02-29 는 있는 날짜이므로 확정 기간이 없으면 오류 없이 False
+        self.store.data["locks"] = []
+        self.assertFalse(queries.is_locked(self.store, "2028-02-29"))
+
     def test_date_object_accepted(self):
-        import datetime as dt
         self.assertTrue(queries.is_locked(self.store, dt.date(2026, 11, 30)))
         self.assertFalse(queries.is_locked(self.store, dt.date(2026, 12, 1)))
 
