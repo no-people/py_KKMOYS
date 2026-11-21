@@ -1,9 +1,12 @@
 """기능 2 분류 규칙 테스트. 자료 항목 category_fixed 포함."""
 
 import json
+import unittest
 
 from helpers import StoreCase
 
+from moim.common import queries
+from moim.common.rules import UNCATEGORIZED
 from moim.common.store import Store
 
 
@@ -38,3 +41,16 @@ class CategoryFixedFormatTest(StoreCase):
         e = Store(self.path("old.json")).load().get_expense(1)
         self.assertNotIn("category_fixed", e)
         self.assertFalse(e.get("category_fixed", False))
+
+
+class CategoryOfTest(unittest.TestCase):
+    """queries.category_of — 공통모듈_함수규격.md 3-3, 규약 5."""
+
+    def test_category_kept(self):
+        self.assertEqual(queries.category_of({"category": "식비"}), "식비")
+
+    def test_none_empty_missing_is_uncategorized(self):
+        # None, 빈 문자열, 키 없음은 모두 "미분류"
+        for e in ({"category": None}, {"category": ""}, {}):
+            self.assertEqual(queries.category_of(e), UNCATEGORIZED)
+        self.assertEqual(UNCATEGORIZED, "미분류")

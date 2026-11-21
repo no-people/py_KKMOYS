@@ -21,7 +21,11 @@ def period_total(store, start, end):
 
 def category_of(e):
     """지출의 분류 이름. 분류가 없으면 규약의 "미분류". 담당: 기능 2"""
-    raise NotImplementedError("기능 2 담당이 구현한다")
+    # category 가 None·빈 문자열이거나 키가 없으면 규약 5의 "미분류"
+    category = e.get("category")
+    if not category:
+        return UNCATEGORIZED
+    return category
 
 
 def category_totals(store, start, end):
