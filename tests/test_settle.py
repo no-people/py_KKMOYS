@@ -237,3 +237,15 @@ class ExpenseSharesTest(StoreCase):
     def test_bad_weights_raise(self):
         with self.assertRaises(ValueError):
             queries.expense_shares(self._e(weights={"김민수": 1}))
+
+    def test_zero_amount(self):
+        self.assertEqual(queries.expense_shares(self._e(amount=0)), {"김민수": 0, "이서연": 0, "박지훈": 0})
+
+    def test_negative_amount_raises(self):
+        with self.assertRaises(ValueError):
+            queries.expense_shares(self._e(amount=-1))
+
+    def test_single_member_payer_outside(self):
+        # 참여자 1명, 낸 사람은 참여자가 아님 → 그 한 명이 전액
+        self.assertEqual(queries.expense_shares(self._e(amount=5, payer="김민수", members=["박지훈"])),
+                         {"박지훈": 5})
