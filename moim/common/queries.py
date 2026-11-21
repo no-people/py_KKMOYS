@@ -16,15 +16,7 @@ def expenses_in(store, start, end, include_deleted=False):
 
 def period_total(store, start, end):
     """기간 합계. 담당: 기능 6"""
-    try:
-        items = expenses_in(store, start, end)
-    except NotImplementedError:
-        items = [
-            e for e in store.data.get("expenses", [])
-            if not e.get("deleted") and dates.in_period(e["date"], start, end)
-        ]
-    return sum(money.to_won(e["amount"]) for e in items)
-
+    raise NotImplementedError("기능 6 담당이 구현한다")
 
 
 def category_of(e):
