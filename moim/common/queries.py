@@ -31,8 +31,11 @@ def category_totals(store, start, end):
 
 def person_paid(store, start, end):
     """사람마다 낸 돈 합계. 담당: 기능 3"""
-    raise NotImplementedError("기능 3 담당이 구현한다")
-
+    totals = {}
+    for exp in expenses_in(store, start, end, include_deleted=False):
+        payer = exp["payer"]
+        totals[payer] = totals.get(payer, 0) + int(exp["amount"])
+    return totals
 
 def is_member_active(store, name, on):
     """그날 모임 회원인가. 가입일 이상, 탈퇴일 이하(탈퇴일 당일까지는 회원). 담당: 기능 5"""
