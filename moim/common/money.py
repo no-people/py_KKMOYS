@@ -30,16 +30,31 @@ def remainder_order(members, payer=None):
 def split(amount, members, payer=None, weights=None):
     """금액을 참여자에게 나눈다. 돌려주는 값: {이름: 부담액}. 합계는 항상 amount 와 같다.
 
-    weights: {이름: 정수 비율}. 없으면 모두 1(균등). 예: {"A": 2, "B": 1, "C": 1}
+    weights: {참여자 전원의 이름: 1 이상 정수 비율} 또는 None(균등). 예: {"A": 2, "B": 1, "C": 1}
+      참여자의 비율이 없거나 1 미만이거나 정수가 아니면 ValueError. 참여자가 아닌 이름은 쓰지 않는다.
     각자 몫은 비율대로 나눈 뒤 원 미만을 버리고, 남는 원은 remainder_order 순서로 1원씩 준다.
     """
+    if isinstance(members, str) or not isinstance(members, (list, tuple)):
+        raise ValueError(f"참여자는 이름 목록이어야 합니다: {members!r}")
     if not members:
         raise ValueError("나눌 사람이 없습니다")
+    if len(set(members)) != len(members):
+        raise ValueError(f"참여자가 중복되었습니다: {list(members)}")
+    if type(amount) is not int:
+        raise ValueError(f"금액은 원 단위 정수여야 합니다: {amount!r}")
     if amount < 0:
         raise ValueError("금액은 음수일 수 없습니다")
-    if weights:
-        raise NotImplementedError("비율 분배는 기능 4 담당이 구현한다")
-    w = {m: 1 for m in members}
+    if weights is None:
+        w = {m: 1 for m in members}
+    else:
+        if not isinstance(weights, dict):
+            raise ValueError(f"비율 형식이 잘못되었습니다: {weights!r}")
+        w = {}
+        for m in members:
+            ratio = weights.get(m)
+            if type(ratio) is not int or ratio <= 0:
+                raise ValueError(f"{m}의 비율은 1 이상 정수여야 합니다: {ratio!r}")
+            w[m] = ratio
     total_w = sum(w.values())
     shares = {m: amount * w[m] // total_w for m in members}
     rest = amount - sum(shares.values())
