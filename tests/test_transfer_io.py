@@ -19,13 +19,13 @@ class TestLedgerDuplicates(StoreCase):
         ]
 
     def test_duplicates_sorted_and_deleted(self):
-        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000), list((3, 9)))
+        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000), [3, 9])
 
     def test_duplicates_exclude_id(self):
-        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000, exclude_id=3), list((9,)))
+        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000, exclude_id=3), [9])
 
     def test_duplicates_string_amount_and_date_obj(self):
-        self.assertEqual(ledger.duplicates(self.store, dt.date(2026, 11, 12), KIM, "36,000"), list((3, 9)))
+        self.assertEqual(ledger.duplicates(self.store, dt.date(2026, 11, 12), KIM, "36,000"), [3, 9])
 
 
 class TestCommonDates(StoreCase):
