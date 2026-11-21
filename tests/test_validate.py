@@ -97,7 +97,7 @@ class TestAmount(ValidateCase):
     def test_bad_format(self):
         for amount in ("abc", "", "Infinity", "NaN", True, None):
             with self.subTest(amount=amount):
-                self.bad("2026-11-12", KIM, amount, [KIM])
+                self.bad("2026-11-12", KIM, amount, [KIM], reason="금액 형식")
 
 
 class TestDate(ValidateCase):
@@ -130,21 +130,31 @@ class TestPeople(ValidateCase):
         self.bad("2026-11-12", KIM, 3000, KIM)
         self.bad("2026-11-12", KIM, 3000, None)
 
+    def test_member_name_not_str(self):
+        """이름 자리에 목록·숫자·None 이 오면 TypeError 가 아니라 ValueError 로 거부한다."""
+        for bad_name in (["x"], 1, None):
+            with self.subTest(name=bad_name):
+                self.bad("2026-11-12", KIM, 3000, [KIM, bad_name], reason="문자열")
+
 
 class TestWeights(ValidateCase):
     def test_missing_member(self):
-        self.bad("2026-11-12", KIM, 3000, [KIM, LEE], weights={KIM: 1})
+        self.bad("2026-11-12", KIM, 3000, [KIM, LEE], weights={KIM: 1}, reason="비율")
 
     def test_extra_name(self):
-        self.bad("2026-11-12", KIM, 3000, [KIM], weights={KIM: 1, LEE: 1})
+        self.bad("2026-11-12", KIM, 3000, [KIM], weights={KIM: 1, LEE: 1}, reason="비율")
 
     def test_not_positive_int(self):
         for w in (0, -1, 1.5, "2", True):
             with self.subTest(w=w):
-                self.bad("2026-11-12", KIM, 3000, [KIM, LEE], weights={KIM: 1, LEE: w})
+                self.bad("2026-11-12", KIM, 3000, [KIM, LEE], weights={KIM: 1, LEE: w}, reason="비율")
 
     def test_not_dict(self):
-        self.bad("2026-11-12", KIM, 3000, [KIM], weights=[1])
+        self.bad("2026-11-12", KIM, 3000, [KIM], weights=[1], reason="비율")
+
+    def test_empty_dict(self):
+        """weights={} 는 균등(None)이 아니라 참여자와 맞지 않는 비율로 거부한다."""
+        self.bad("2026-11-12", KIM, 3000, [KIM, LEE], weights={}, reason="비율")
 
     def test_payer_not_member_in_weights(self):
         """낸 사람이 참여자가 아니면 weights 에 들어 있어도 안 된다."""
