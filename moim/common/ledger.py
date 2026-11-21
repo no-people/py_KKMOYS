@@ -11,7 +11,7 @@ def validate(store, date, payer, amount, members, weights=None):
     day = dates.fmt(date)
     try:
         won = money.to_won(amount)
-    except ArithmeticError:   # "Infinity" 등은 Decimal 이 ValueError 가 아닌 오류를 낸다
+    except (ArithmeticError, ValueError):   # "Infinity"·"NaN" 은 Decimal 오류나 영어 메시지가 나온다
         raise ValueError(f"금액 형식이 잘못되었습니다: {amount}") from None
     if won <= 0:
         raise ValueError(f"0원 이하 지출은 받지 않습니다: {won}")
@@ -24,6 +24,8 @@ def validate(store, date, payer, amount, members, weights=None):
         raise ValueError("참여자가 없습니다")
     seen = set()
     for name in members:
+        if not isinstance(name, str):
+            raise ValueError(f"참여자 이름은 문자열이어야 합니다: {name!r}")
         if name in seen:
             raise ValueError(f"참여자가 중복되었습니다: {name}")
         seen.add(name)
@@ -71,4 +73,27 @@ def duplicates(store, date, payer, amount, exclude_id=None):
 def insert(store, date, payer, amount, members, memo="", weights=None, category=None,
            recurring_id=None, action="add"):
     """검사 후 지출을 저장한다. 확정 기간이면 거부한다. 돌려주는 값: 새 지출(dict). 담당: 기능 1"""
-    raise NotImplementedError("기능 1 담당이 구현한다")
+    day, won = validate(store, date, payer, amount, members, weights)
+    if is_locked(store, day):
+        raise ValueError(f"정산이 확정된 기간입니다: {day}")
+    e = {
+        "id": store.new_id(),
+        "date": day,
+        "payer": payer,
+        "amount": won,
+        "members": list(members),
+        "weights": dict(weights) if weights is not None else None,
+        "category": category,
+        "memo": str(memo) if memo is not None else "",
+        "deleted": False,
+        "recurring_id": recurring_id,
+        "category_fixed": False,
+    }
+    store.data["expenses"].append(e)
+    try:
+        store.record(action, e["id"], None, e)
+    except Exception:
+        store.data["expenses"].pop()
+        store.data["next_id"] = e["id"]
+        raise
+    return e
