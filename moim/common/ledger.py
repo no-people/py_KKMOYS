@@ -26,7 +26,8 @@ def duplicates(store, date, payer, amount, exclude_id=None):
             and money.to_won(e["amount"]) == target_amount
         ):
             out.append(e["id"])
-    return out
+    return sorted(out)
+
 
 
 def insert(store, date, payer, amount, members, memo="", weights=None, category=None,
