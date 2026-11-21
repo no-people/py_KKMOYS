@@ -65,7 +65,12 @@ def member_shares(store, start, end):
 
 def is_locked(store, on):
     """정산이 확정된 기간에 속하는 날짜인가. 담당: 기능 4"""
-    for lock in store.data.get("locks", []):
+    locks = store.data.get("locks")
+    if locks is None:   # 옛 파일의 "locks": null 이나 키가 없는 경우 (Store.record 의 history 처리와 같은 방식)
+        locks = []
+    elif not isinstance(locks, list):   # 깨진 자료를 "확정 없음"으로 넘기면 규약 6 보호가 풀리므로 거부
+        raise ValueError("자료 파일의 locks 형식이 잘못되었습니다")
+    for lock in locks:
         if dates.in_period(on, lock["start"], lock["end"]):
             return True
     return False
