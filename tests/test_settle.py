@@ -210,3 +210,65 @@ class WeightsFormatTest(StoreCase):
         e = Store(self.path("old.json")).load().get_expense(1)
         self.assertNotIn("weights", e)
         self.assertIsNone(e.get("weights"))
+
+
+class ExpenseSharesTest(StoreCase):
+    """queries.expense_shares. 공통모듈_함수규격.md 3-8, 규약 2."""
+
+    def _e(self, **kw):
+        e = {"id": 1, "date": "2026-11-12", "payer": "이서연", "amount": 100,
+             "members": ["김민수", "이서연", "박지훈"], "weights": None, "category": None,
+             "memo": "", "deleted": False, "recurring_id": None}
+        e.update(kw)
+        return e
+
+    def test_spec_example(self):
+        # 규격 3-8 예: 100원, 낸 사람 이서연 → 남는 1원은 이서연
+        self.assertEqual(queries.expense_shares(self._e()), {"김민수": 33, "이서연": 34, "박지훈": 33})
+
+    def test_weights_used(self):
+        e = self._e(amount=101, payer="박지훈", weights={"김민수": 2, "이서연": 1, "박지훈": 1})
+        self.assertEqual(queries.expense_shares(e), {"김민수": 50, "이서연": 25, "박지훈": 26})
+
+    def test_same_as_money_split(self):
+        # 따로 나누지 않고 money.split 결과와 같다
+        e = self._e(amount=10000, payer="라", weights={"김민수": 3, "이서연": 5, "박지훈": 7})
+        self.assertEqual(queries.expense_shares(e),
+                         money.split(10000, e["members"], "라", e["weights"]))
+
+    def test_old_expense_without_weights_key(self):
+        # weights 키가 없는 옛 지출은 균등
+        e = self._e()
+        del e["weights"]
+        self.assertEqual(queries.expense_shares(e), {"김민수": 33, "이서연": 34, "박지훈": 33})
+
+    def test_payer_not_member(self):
+        e = self._e(amount=101, payer="외부인")
+        self.assertEqual(queries.expense_shares(e), {"김민수": 34, "이서연": 34, "박지훈": 33})
+
+    def test_sum_equals_amount(self):
+        e = self._e(amount=36001, weights={"김민수": 1, "이서연": 2, "박지훈": 4})
+        self.assertEqual(sum(queries.expense_shares(e).values()), 36001)
+
+    def test_does_not_change_expense(self):
+        e = self._e(weights={"김민수": 2, "이서연": 1, "박지훈": 1})
+        before = {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+                  for k, v in e.items()}
+        queries.expense_shares(e)
+        self.assertEqual(e, before)
+
+    def test_bad_weights_raise(self):
+        with self.assertRaises(ValueError):
+            queries.expense_shares(self._e(weights={"김민수": 1}))
+
+    def test_zero_amount(self):
+        self.assertEqual(queries.expense_shares(self._e(amount=0)), {"김민수": 0, "이서연": 0, "박지훈": 0})
+
+    def test_negative_amount_raises(self):
+        with self.assertRaises(ValueError):
+            queries.expense_shares(self._e(amount=-1))
+
+    def test_single_member_payer_outside(self):
+        # 참여자 1명, 낸 사람은 참여자가 아님 → 그 한 명이 전액
+        self.assertEqual(queries.expense_shares(self._e(amount=5, payer="김민수", members=["박지훈"])),
+                         {"박지훈": 5})
