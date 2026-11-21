@@ -87,6 +87,7 @@ def insert(store, date, payer, amount, members, memo="", weights=None, category=
         "memo": str(memo) if memo is not None else "",
         "deleted": False,
         "recurring_id": recurring_id,
+        "category_fixed": False,
     }
     store.data["expenses"].append(e)
     try:

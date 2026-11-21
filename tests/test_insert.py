@@ -27,11 +27,12 @@ class InsertCase(StoreCase):
 
 class TestAdd(InsertCase):
     def test_spec_example(self):
-        """규격 4-3 예(기본 테스트 F1 test_add)와 키·값이 모두 같아야 한다."""
+        """규격 4-3 예(기본 테스트 F1 test_add)·0장 지출 형식과 키·값이 모두 같아야 한다."""
         e = insert(self.store, "2026-11-12", KIM, "36,000", list(NAMES), memo="회의 후 저녁")
         self.assertEqual(e, {"id": 1, "date": "2026-11-12", "payer": KIM, "amount": 36000,
                              "members": list(NAMES), "weights": None, "category": None,
-                             "memo": "회의 후 저녁", "deleted": False, "recurring_id": None})
+                             "memo": "회의 후 저녁", "deleted": False, "recurring_id": None,
+                             "category_fixed": False})
         self.assertIs(self.store.data["expenses"][-1], e)
 
     def test_ids_increase(self):
