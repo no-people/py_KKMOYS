@@ -41,6 +41,20 @@ class IsLockedTest(StoreCase):
         old = Store(self.path("old.json")).load()
         self.assertFalse(queries.is_locked(old, "2026-11-15"))
 
+    def test_old_file_locks_null(self):
+        # "locks": null 인 옛 자료 파일도 TypeError 없이 False (규격 3-10 "locks 가 없으면 False")
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1, "locks": None}, f)
+        old = Store(self.path("old.json")).load()
+        self.assertFalse(queries.is_locked(old, "2026-11-15"))
+
+    def test_locks_not_list_raises(self):
+        # 깨진 locks 를 확정 기간 없음으로 넘기지 않는다
+        for bad in ({}, "abc", 0, False):
+            self.store.data["locks"] = bad
+            with self.assertRaisesRegex(ValueError, "locks 형식"):
+                queries.is_locked(self.store, "2026-11-15")
+
     def test_bad_date_raises(self):
         with self.assertRaises(ValueError):
             queries.is_locked(self.store, "2026-11-31")
