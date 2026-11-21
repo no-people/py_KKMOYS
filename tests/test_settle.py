@@ -272,3 +272,94 @@ class ExpenseSharesTest(StoreCase):
         # 참여자 1명, 낸 사람은 참여자가 아님 → 그 한 명이 전액
         self.assertEqual(queries.expense_shares(self._e(amount=5, payer="김민수", members=["박지훈"])),
                          {"박지훈": 5})
+
+
+class MemberSharesTest(StoreCase):
+    """queries.member_shares. 공통모듈_함수규격.md 3-9, 규약 2·3·6-1."""
+
+    S, E = "2026-11-10", "2026-11-20"
+
+    def _add(self, date, payer, amount, members=None, weights=None, deleted=False):
+        e = {"id": self.store.new_id(), "date": date, "payer": payer, "amount": amount,
+             "members": members or ["김민수", "이서연", "박지훈"], "weights": weights,
+             "category": None, "memo": "", "deleted": deleted, "recurring_id": None}
+        self.store.data["expenses"].append(e)
+        return e
+
+    def test_spec_example(self):
+        # 규격 3-9 예: 11-12 이서연 6,000 → 2000씩, 11-13 김민수 100 더 → 나머지 1원은 김민수
+        self._add("2026-11-12", "이서연", 6000)
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E),
+                         {"김민수": 2000, "이서연": 2000, "박지훈": 2000})
+        self._add("2026-11-13", "김민수", 100)
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E),
+                         {"김민수": 2034, "이서연": 2033, "박지훈": 2033})
+
+    def test_period_start_end_included(self):
+        # 규약 3: 시작일·끝일 포함, 밖은 제외
+        self._add("2026-11-09", "김민수", 3000)
+        self._add("2026-11-10", "김민수", 300)
+        self._add("2026-11-20", "김민수", 600)
+        self._add("2026-11-21", "김민수", 9000)
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E),
+                         {"김민수": 300, "이서연": 300, "박지훈": 300})
+
+    def test_deleted_excluded(self):
+        # 규약 6-1: 삭제 표시한 지출은 정산에서 뺀다
+        self._add("2026-11-12", "김민수", 3000)
+        self._add("2026-11-13", "김민수", 9000, deleted=True)
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E),
+                         {"김민수": 1000, "이서연": 1000, "박지훈": 1000})
+
+    def test_sum_equals_period_total(self):
+        # 합계는 기간 안(삭제 제외) 지출 금액 합(= period_total)과 같다
+        self._add("2026-11-12", "김민수", 10001, weights={"김민수": 1, "이서연": 2, "박지훈": 4})
+        self._add("2026-11-13", "이서연", 333, members=["이서연", "박지훈"])
+        self._add("2026-11-14", "박지훈", 7)
+        self._add("2026-11-15", "박지훈", 5000, deleted=True)
+        shares = queries.member_shares(self.store, self.S, self.E)
+        self.assertEqual(sum(shares.values()), 10001 + 333 + 7)
+
+    def test_weights_and_partial_members(self):
+        self._add("2026-11-12", "박지훈", 101, weights={"김민수": 2, "이서연": 1, "박지훈": 1})
+        self._add("2026-11-13", "이서연", 1001, members=["이서연", "박지훈"])
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E),
+                         {"김민수": 50, "이서연": 25 + 501, "박지훈": 26 + 500})
+
+    def test_only_people_who_owe(self):
+        # 그 기간 지출에 참여하지 않은 사람은 결과에 없다
+        self._add("2026-11-12", "김민수", 1000, members=["김민수", "이서연"])
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E), {"김민수": 500, "이서연": 500})
+
+    def test_empty_period(self):
+        self._add("2026-12-01", "김민수", 3000)
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E), {})
+
+    def test_old_expense_without_weights_or_deleted(self):
+        # weights·deleted 키가 없는 옛 지출도 균등·삭제 아님으로 본다
+        self.store.data["expenses"].append({"id": 1, "date": "2026-11-12", "payer": "김민수",
+                                            "amount": 3000, "members": ["김민수", "이서연", "박지훈"],
+                                            "category": None, "memo": ""})
+        self.assertEqual(queries.member_shares(self.store, self.S, self.E),
+                         {"김민수": 1000, "이서연": 1000, "박지훈": 1000})
+
+    def test_broken_expense_error_has_id(self):
+        # 나눌 수 없는 지출은 번호가 담긴 ValueError (KeyError 가 그대로 올라가지 않음)
+        e = self._add("2026-11-12", "김민수", 1000, weights={"김민수": 1})
+        with self.assertRaisesRegex(ValueError, f"{e['id']}번 지출"):
+            queries.member_shares(self.store, self.S, self.E)
+        self.store.data["expenses"] = [{"id": 7, "date": "2026-11-12", "amount": 1000,
+                                        "members": ["김민수"]}]   # payer 없음
+        with self.assertRaisesRegex(ValueError, "7번 지출"):
+            queries.member_shares(self.store, self.S, self.E)
+        self.store.data["expenses"] = [{"id": 8, "date": "2026-11-12", "payer": "김민수", "amount": 1000,
+                                        "members": [["김민수"]]}]   # 이름 대신 목록 → TypeError 가 아니라 ValueError
+        with self.assertRaisesRegex(ValueError, "8번 지출"):
+            queries.member_shares(self.store, self.S, self.E)
+
+    def test_bad_period_raises(self):
+        # 지출이 없어도 시작일·끝일이 잘못되면 ValueError
+        for start, end in (("2026-11-31", self.E), (self.S, "2026-11-31"), (self.S, "x")):
+            with self.subTest(start=start, end=end):
+                with self.assertRaises(ValueError):
+                    queries.member_shares(self.store, start, end)
