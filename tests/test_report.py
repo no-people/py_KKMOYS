@@ -5,6 +5,28 @@ import unittest
 from moim.common import queries
 
 
+class TestExpensesIn(unittest.TestCase):
+    def setUp(self):
+        self.store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-11-05", "payer": "민기슬", "amount": 3000, "deleted": False},
+                    {"id": 2, "date": "2026-11-10", "payer": "강동휘", "amount": 6000, "deleted": False},
+                    {"id": 3, "date": "2026-11-20", "payer": "오재원", "amount": 9000, "deleted": True},
+                    {"id": 4, "date": "2026-11-21", "payer": "염승민", "amount": 1000, "deleted": False},
+                ]
+            }
+        )
+
+    def test_expenses_in_excludes_deleted_by_default(self):
+        result = queries.expenses_in(self.store, "2026-11-10", "2026-11-20")
+        self.assertEqual([e["id"] for e in result], [2])
+
+    def test_expenses_in_includes_deleted_when_requested(self):
+        result = queries.expenses_in(self.store, "2026-11-10", "2026-11-20", include_deleted=True)
+        self.assertEqual([e["id"] for e in result], [2, 3])
+
+
 class TestPersonPaid(unittest.TestCase):
     def setUp(self):
         self.store = SimpleNamespace(
