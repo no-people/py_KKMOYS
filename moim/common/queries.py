@@ -61,7 +61,16 @@ def expense_shares(e):
 
 def member_shares(store, start, end):
     """기간 동안 사람마다 부담할 돈 합계. 담당: 기능 4"""
-    raise NotImplementedError("기능 4 담당이 구현한다")
+    start, end = dates.parse(start), dates.parse(end)   # 지출이 없어도 잘못된 날짜는 ValueError
+    totals = {}
+    for e in expenses_in(store, start, end):   # 기간 양 끝 포함, 삭제 표시 제외 (규격 3-9)
+        try:
+            shares = expense_shares(e)
+        except (KeyError, TypeError, ValueError) as exc:   # 깨진 지출은 번호를 붙여 이유를 알린다 (규격 0장 오류 약속)
+            raise ValueError(f"{e.get('id')}번 지출을 나눌 수 없습니다: {exc}") from None
+        for name, won in shares.items():
+            totals[name] = totals.get(name, 0) + won
+    return totals
 
 
 def is_locked(store, on):
