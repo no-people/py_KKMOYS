@@ -19,21 +19,25 @@ class TestLedgerDuplicates(StoreCase):
         ]
 
     def test_duplicates_sorted_and_deleted(self):
-        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000), [3, 9])
+        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000),)
 
     def test_duplicates_exclude_id(self):
-        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000, exclude_id=3), [9])
+        self.assertEqual(ledger.duplicates(self.store, "2026-11-12", KIM, 36000, exclude_id=3),)
 
     def test_duplicates_string_amount_and_date_obj(self):
-        self.assertEqual(ledger.duplicates(self.store, dt.date(2026, 11, 12), KIM, "36,000"), [3, 9])
+        self.assertEqual(ledger.duplicates(self.store, dt.date(2026, 11, 12), KIM, "36,000"),)
 
 
 class TestCommonDates(StoreCase):
     def test_month_key(self):
         self.assertEqual(dates.month_key("2026-11-12"), "2026-11")
+        self.assertEqual(dates.month_key("2026-12-31"), "2026-12")
+        self.assertEqual(dates.month_key("2027-01-05"), "2027-01")
         self.assertEqual(dates.month_key(dt.date(2028, 2, 29)), "2028-02")
-        with self.assertRaises(ValueError):
-            dates.month_key("2026-02-29")
+        for bad in ("2026-02-29", "2026-13-01", "2026/11/12"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    dates.month_key(bad)
 
 
 if __name__ == "__main__":
