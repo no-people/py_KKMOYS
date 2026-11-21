@@ -50,7 +50,22 @@ def validate(store, date, payer, amount, members, weights=None):
 
 def duplicates(store, date, payer, amount, exclude_id=None):
     """같은 날·같은 금액·같은 사람의 지출 번호 목록(삭제된 것 제외). 담당: 기능 6"""
-    raise NotImplementedError("기능 6 담당이 구현한다")
+    target_date = dates.fmt(date)
+    target_amount = money.to_won(amount)
+    out = []
+    for e in store.data.get("expenses", []):
+        if e.get("deleted"):
+            continue
+        if exclude_id is not None and e.get("id") == exclude_id:
+            continue
+        if (
+            dates.fmt(e["date"]) == target_date
+            and e.get("payer") == payer
+            and money.to_won(e["amount"]) == target_amount
+        ):
+            out.append(e["id"])
+    return sorted(out)
+
 
 
 def insert(store, date, payer, amount, members, memo="", weights=None, category=None,
