@@ -1,7 +1,7 @@
 import datetime as dt
 import unittest
 from helpers import NAMES, StoreCase
-from moim.common import ledger, queries
+from moim.common import dates, ledger, queries
 
 KIM, LEE, PARK = NAMES
 
@@ -28,6 +28,7 @@ class TestLedgerDuplicates(StoreCase):
         self.assertEqual(ledger.duplicates(self.store, dt.date(2026, 11, 12), KIM, "36,000"), [3, 9])
 
 
+
 class TestCommonQueries(StoreCase):
     def test_period_total(self):
         self.store.data["expenses"] = [
@@ -39,6 +40,18 @@ class TestCommonQueries(StoreCase):
         self.assertEqual(queries.period_total(self.store, "2026-11-01", "2026-11-30"), 35000)
         self.assertEqual(queries.period_total(self.store, "2026-10-01", "2026-10-31"), 0)
         self.assertEqual(queries.period_total(self.store, dt.date(2026, 11, 1), dt.date(2026, 11, 30)), 35000)
+
+
+class TestCommonDates(StoreCase):
+    def test_month_key(self):
+        self.assertEqual(dates.month_key("2026-11-12"), "2026-11")
+        self.assertEqual(dates.month_key("2026-12-31"), "2026-12")
+        self.assertEqual(dates.month_key("2027-01-05"), "2027-01")
+        self.assertEqual(dates.month_key(dt.date(2028, 2, 29)), "2028-02")
+        for bad in ("2026-02-29", "2026-13-01", "2026/11/12"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    dates.month_key(bad)
 
 
 if __name__ == "__main__":
