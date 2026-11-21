@@ -11,7 +11,7 @@ def validate(store, date, payer, amount, members, weights=None):
     day = dates.fmt(date)
     try:
         won = money.to_won(amount)
-    except ArithmeticError:   # "Infinity" 등은 Decimal 이 ValueError 가 아닌 오류를 낸다
+    except (ArithmeticError, ValueError):   # "Infinity"·"NaN" 은 Decimal 오류나 영어 메시지가 나온다
         raise ValueError(f"금액 형식이 잘못되었습니다: {amount}") from None
     if won <= 0:
         raise ValueError(f"0원 이하 지출은 받지 않습니다: {won}")
@@ -24,6 +24,8 @@ def validate(store, date, payer, amount, members, weights=None):
         raise ValueError("참여자가 없습니다")
     seen = set()
     for name in members:
+        if not isinstance(name, str):
+            raise ValueError(f"참여자 이름은 문자열이어야 합니다: {name!r}")
         if name in seen:
             raise ValueError(f"참여자가 중복되었습니다: {name}")
         seen.add(name)
