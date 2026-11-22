@@ -59,4 +59,3 @@ class TestActiveMembers(StoreCase):
             self.assertEqual(queries.active_members(self.store, "2026-11-15"), [PARK])
         self.assertEqual([call.args[1:] for call in active.call_args_list], [
             (LEE, "2026-11-15"), (PARK, "2026-11-15"), (KIM, "2026-11-15")])
-
