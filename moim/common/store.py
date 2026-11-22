@@ -21,6 +21,7 @@ EMPTY = {
     "locks": [],        # {"start", "end"} 정산 확정 기간(양 끝 포함). 기능 4
     "history": [],      # {"id", "action", "before", "after", "at"} 지출 변경 이력. 기능 1
     "payments": [],     # {"date", "member", "amount", "memo", "source"} 회비 입금. source: manual 또는 bank. 기능 5
+    "transfers": [],    # {"date", "from", "to", "amount"} 이미 보낸 송금(부분 정산). from 이 to 에게 amount 원. 기능 4
 }
 
 
