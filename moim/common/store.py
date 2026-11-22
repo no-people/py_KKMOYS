@@ -19,6 +19,10 @@ EMPTY = {
                         # category_fixed: 사람이 직접 정한 분류면 True(다시 분류할 때 건너뜀). 없는 옛 지출은 False 로 본다. 기능 2
     "next_id": 1,
     "locks": [],        # {"start", "end"} 정산 확정 기간(양 끝 포함). 기능 4
+    "recurring": [],    # {"id", "day", "payer", "amount", "members", "memo", "category", "start", "made"} 반복 지출. 기능 4
+                        # id: 반복 지출끼리 따로 1부터(가장 큰 id + 1). day: 1~31, 그달에 없으면 말일
+                        # category: 만든 지출에 넘길 분류 또는 None(미분류). start: 첫 달 "YYYY-MM"
+                        # made: 이미 만든 달 "YYYY-MM" 목록(다시 만들지 않음). 읽는 쪽은 "recurring": null 을 빈 목록으로 본다
     "history": [],      # {"id", "action", "before", "after", "at"} 지출 변경 이력. 기능 1
     "payments": [],     # {"date", "member", "amount", "memo", "source"} 회비 입금. source: manual 또는 bank. 기능 5
 }
