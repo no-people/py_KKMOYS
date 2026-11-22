@@ -212,6 +212,38 @@ class WeightsFormatTest(StoreCase):
         self.assertIsNone(e.get("weights"))
 
 
+class RecurringFormatTest(StoreCase):
+    """자료 항목 recurring. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목" 표의 recurring 행."""
+
+    R = {"id": 1, "day": 31, "payer": "김민수", "amount": 300000, "members": ["김민수", "이서연", "박지훈"],
+         "memo": "정기 대관료", "category": None, "start": "2026-11", "made": ["2026-11"]}
+
+    def test_empty_has_recurring(self):
+        self.assertEqual(Store(self.path("new.json")).load().data["recurring"], [])
+
+    def test_saved_and_loaded(self):
+        self.store.data["recurring"].append(dict(self.R))
+        self.store.save()
+        loaded = Store(self.store.path).load().data["recurring"]
+        self.assertEqual(loaded, [self.R])
+        self.assertIs(type(loaded[0]["day"]), int)
+        self.assertIs(type(loaded[0]["amount"]), int)
+        self.assertEqual(loaded[0]["made"], ["2026-11"])
+        self.assertEqual(loaded[0]["start"], "2026-11")
+        self.assertIsNone(loaded[0]["category"])   # add_recurring 은 분류를 받지 않으므로 None(미분류)
+
+    def test_old_file_without_recurring(self):
+        # recurring 이 생기기 전의 옛 자료 파일도 읽으면 기본값 [] 로 채워진다
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["recurring"], [])
+
+    def test_existing_recurring_kept_on_load(self):
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 2, "recurring": [self.R]}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["recurring"], [self.R])
+
+
 class ExpenseSharesTest(StoreCase):
     """queries.expense_shares. 공통모듈_함수규격.md 3-8, 규약 2."""
 
@@ -363,3 +395,31 @@ class MemberSharesTest(StoreCase):
             with self.subTest(start=start, end=end):
                 with self.assertRaises(ValueError):
                     queries.member_shares(self.store, start, end)
+
+
+class TransfersFormatTest(StoreCase):
+    """자료 항목 transfers: [{"date", "from", "to", "amount"}]. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목"."""
+
+    def test_empty_has_transfers(self):
+        self.assertEqual(Store(self.path("new.json")).load().data["transfers"], [])
+
+    def test_saved_and_loaded(self):
+        t = {"date": "2026-11-21", "from": "이서연", "to": "김민수", "amount": 3000}
+        self.store.data["transfers"].append(t)
+        self.store.save()
+        loaded = Store(self.store.path).load().data["transfers"]
+        self.assertEqual(loaded, [t])
+        self.assertIs(type(loaded[0]["amount"]), int)
+
+    def test_old_file_without_transfers(self):
+        # transfers 가 생기기 전의 옛 자료 파일도 읽으면 기본값 [] 로 채워진다
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [])
+
+    def test_existing_transfers_kept_on_load(self):
+        # 이미 있는 송금 기록을 기본값으로 덮어쓰지 않는다
+        t = {"date": "2026-11-21", "from": "박지훈", "to": "김민수", "amount": 1}
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1, "transfers": [t]}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [t])
