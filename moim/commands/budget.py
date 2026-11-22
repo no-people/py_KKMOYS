@@ -5,7 +5,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import money
+from ..common import money, textfmt
 from ..features import budget
 
 GROUP = 'budget'
@@ -18,6 +18,8 @@ def add_parser(sub, period_args):
     status.add_argument("--today", help="이 날짜까지의 지출만 조회(YYYY-MM-DD)")
     categories = grp.add_parser("categories", help="분류별 예산·사용액·초과 경보")
     categories.add_argument("--month", required=True, help="YYYY-MM")
+    table = grp.add_parser("table", help="분류별 예산 대비 실제 지출 표")
+    table.add_argument("--month", required=True, help="YYYY-MM")
     pay = grp.add_parser("pay", help="회비 입금 기록")
     pay.add_argument("--date", required=True, help="YYYY-MM-DD")
     pay.add_argument("--member", required=True, help="명부에 있는 회원 이름")
@@ -52,6 +54,13 @@ def run(c, args, cfg, store, out):
         out(f"회비 입금 기록: {payment['date']} {payment['member']} "
             f"{money.fmt(payment['amount'])}원")
         return True
+    if c == "table":
+        rows = budget.budget_table(store, cfg, args.month)
+        out(textfmt.table(["분류", "예산", "실제", "차이"], rows[:-1],
+                          total=rows[-1], numeric={1, 2, 3}))
+        if sum(row[1] for row in rows[:-1]) != rows[-1][1]:
+            out("전체 예산은 월 전체 예산 설정 기준입니다.")
+        return False
     if c == "balance":
         balance = budget.treasury_balance(store, args.until)
         out(f"통장 잔고: {money.fmt(balance)}원")
