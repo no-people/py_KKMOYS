@@ -23,6 +23,8 @@ def add_parser(sub, period_args):
     pay.add_argument("--memo", default="", help="입금 메모")
     balance = grp.add_parser("balance", help="회비 입금 합계에서 지출을 뺀 통장 잔고")
     balance.add_argument("--until", help="이 날짜까지 조회(YYYY-MM-DD, 당일 포함)")
+    unpaid = grp.add_parser("unpaid", help="그달 1일 또는 말일 회원의 회비 미납 목록")
+    unpaid.add_argument("--month", required=True, help="YYYY-MM")
     return grp
 
 
@@ -42,5 +44,12 @@ def run(c, args, cfg, store, out):
     if c == "balance":
         balance = budget.treasury_balance(store, args.until)
         out(f"통장 잔고: {money.fmt(balance)}원")
+        return False
+    if c == "unpaid":
+        rows = budget.unpaid(store, cfg, args.month)
+        for name, paid, missing in rows:
+            out(f"{name}: 납부 {money.fmt(paid)}원, 미납 {money.fmt(missing)}원")
+        if not rows:
+            out("미납자가 없습니다.")
         return False
     raise ValueError(f"모르는 예산·회비 명령입니다: {c}")
