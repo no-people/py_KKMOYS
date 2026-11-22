@@ -363,3 +363,31 @@ class MemberSharesTest(StoreCase):
             with self.subTest(start=start, end=end):
                 with self.assertRaises(ValueError):
                     queries.member_shares(self.store, start, end)
+
+
+class TransfersFormatTest(StoreCase):
+    """자료 항목 transfers: [{"date", "from", "to", "amount"}]. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목"."""
+
+    def test_empty_has_transfers(self):
+        self.assertEqual(Store(self.path("new.json")).load().data["transfers"], [])
+
+    def test_saved_and_loaded(self):
+        t = {"date": "2026-11-21", "from": "이서연", "to": "김민수", "amount": 3000}
+        self.store.data["transfers"].append(t)
+        self.store.save()
+        loaded = Store(self.store.path).load().data["transfers"]
+        self.assertEqual(loaded, [t])
+        self.assertIs(type(loaded[0]["amount"]), int)
+
+    def test_old_file_without_transfers(self):
+        # transfers 가 생기기 전의 옛 자료 파일도 읽으면 기본값 [] 로 채워진다
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [])
+
+    def test_existing_transfers_kept_on_load(self):
+        # 이미 있는 송금 기록을 기본값으로 덮어쓰지 않는다
+        t = {"date": "2026-11-21", "from": "박지훈", "to": "김민수", "amount": 1}
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1, "transfers": [t]}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [t])
