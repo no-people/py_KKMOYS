@@ -57,6 +57,17 @@ class CategoryOfTest(unittest.TestCase):
                 self.assertEqual(queries.category_of(e), UNCATEGORIZED)
         self.assertEqual(UNCATEGORIZED, "미분류")
 
+    def test_surrounding_spaces_stripped(self):
+        # 앞뒤 공백은 떼서 돌려준다(" 식비 " 와 "식비" 가 같은 분류)
+        self.assertEqual(queries.category_of({"category": " 식비 "}), "식비")
+
+    def test_non_string_category_raises(self):
+        # 문자열이 아닌 참 값은 번호를 붙인 ValueError (규격 0장 오류 약속)
+        for bad in (5, ["식비"], True, 3.0):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "7번 지출의 분류 형식"):
+                    queries.category_of({"id": 7, "category": bad})
+
     def test_fixed_does_not_change_category(self):
         # category_fixed 는 다시 분류할 때만 쓰고, 분류 이름에는 영향이 없다
         for fixed in (True, False):
@@ -111,6 +122,34 @@ class CategoryTotalsTest(StoreCase):
         self.assertEqual(result[UNCATEGORIZED], {"count": 3, "amount": 2700})
         self.assertNotIn(" ", result)
 
+    def test_spaces_merged_and_old_expense_without_key(self):
+        # " 식비 " 는 "식비" 칸으로, category 키가 없는 옛 지출은 "미분류" 칸으로
+        self._add(5, "2026-11-16", 500, " 식비 ")
+        self.store.data["expenses"].append(
+            {"id": 6, "date": "2026-11-17", "payer": "김민수", "amount": 700, "members": ["김민수"]})
+        result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result["식비"], {"count": 3, "amount": 10500})
+        self.assertEqual(result[UNCATEGORIZED], {"count": 2, "amount": 2700})
+
+    def test_deleted_only_category_absent(self):
+        # 삭제 지출만 있는 분류는 결과에 키가 없다(지출이 있는 분류만, 규격 3-4)
+        self._add(5, "2026-11-20", 3000, "장소", deleted=True)
+        self.assertNotIn("장소", queries.category_totals(self.store, "2026-11-01", "2026-11-30"))
+
+    def test_amount_is_int_won(self):
+        # 금액은 period_total 과 같은 money.to_won 으로 더해 int (2.5 → 3, "6,000" → 6000)
+        self._add(5, "2026-11-21", 2.5, "교통")
+        self._add(6, "2026-11-22", "6,000", "교통")
+        result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result["교통"], {"count": 3, "amount": 15003})
+        self.assertIsInstance(result["교통"]["amount"], int)
+
+    def test_bad_category_raises(self):
+        # 분류 형식이 깨진 지출이 있으면 번호를 붙인 ValueError
+        self._add(5, "2026-11-23", 100, 5)
+        with self.assertRaisesRegex(ValueError, "5번 지출의 분류 형식"):
+            queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+
     def test_date_object_args(self):
         # 날짜 인자는 date 객체로 줘도 같다(규격 0장)
         self.assertEqual(queries.category_totals(self.store, date(2026, 11, 1), date(2026, 11, 30)),
@@ -125,4 +164,3 @@ class CategoryTotalsTest(StoreCase):
         result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
         total = queries.period_total(self.store, "2026-11-01", "2026-11-30")
         self.assertEqual(sum(v["amount"] for v in result.values()), total)
-        
