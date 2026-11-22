@@ -41,21 +41,84 @@ def add_expense(store, date, payer, amount, members, memo="", weights=None, cate
     raise NotImplementedError("이 함수를 구현한다")
 
 
+_ORDERS = {
+    "id": lambda e: e["id"],
+    "date": lambda e: (str(e["date"]), e["id"]),   # 저장 형식 YYYY-MM-DD 는 문자열 순서가 날짜 순서
+    "amount": lambda e: (e["amount"], e["id"]),
+}
+_EDITABLE = ("date", "payer", "amount", "members", "memo", "weights", "category")
+
+
+def _check_unlocked(store, day, eid):
+    """확정 기간이면 거부한다. 날짜·locks 가 깨져 is_locked 가 ValueError 를 내도 잠기지 않은 것으로 넘기지 않는다."""
+    try:
+        locked = is_locked(store, day)
+    except ValueError as exc:
+        raise ValueError(f"{eid}번 지출: {exc}") from None
+    if locked:
+        raise ValueError(f"정산이 확정된 기간입니다: {dates.fmt(day)}")
+
+
+def _live_expense(store, eid):
+    e = store.get_expense(eid)
+    if e.get("deleted"):
+        raise ValueError(f"삭제된 지출입니다: {e['id']}번 (되살린 뒤 고치세요)")
+    return e
+
+
 def list_expenses(store, order="id", include_deleted=False):
-    raise NotImplementedError("이 함수를 구현한다")
+    if order not in _ORDERS:
+        raise ValueError(f"정렬 기준은 {', '.join(_ORDERS)} 중 하나입니다: {order}")
+    items = [e for e in store.data.get("expenses", []) if include_deleted or not e.get("deleted")]
+    return sorted(items, key=_ORDERS[order])
 
 
 def edit_expense(store, eid, **changes):
-    """지출을 고친다. 바꿀 수 있는 항목: date, payer, amount, members, memo, weights, category."""
-    raise NotImplementedError("이 함수를 구현한다")
+    """지출을 고친다. 바꿀 수 있는 항목: date, payer, amount, members, memo, weights, category.
+    돌려주는 값: (지출, 경고 목록)."""
+    unknown = sorted(set(changes) - set(_EDITABLE))
+    if unknown:
+        raise ValueError(f"바꿀 수 없는 항목입니다: {', '.join(unknown)}")
+    if not changes:
+        raise ValueError("바꿀 항목이 없습니다")
+    e = _live_expense(store, eid)
+    _check_unlocked(store, e["date"], e["id"])   # 규약 6: 확정 기간의 지출은 못 고치고
+    new = {k: e.get(k) for k in _EDITABLE}
+    new.update(changes)
+    day, won = ledger.validate(store, new["date"], new["payer"], new["amount"], new["members"], new["weights"])
+    _check_unlocked(store, day, e["id"])         # 다른 날짜의 지출을 확정 기간으로 옮기지도 못한다
+    dup = ledger.duplicates(store, day, new["payer"], won, exclude_id=e["id"])
+    after = dict(e, date=day, payer=new["payer"], amount=won, members=list(new["members"]),
+                 weights=dict(new["weights"]) if new["weights"] is not None else None,
+                 memo=str(new["memo"]) if new["memo"] is not None else "", category=new["category"])
+    store.record("edit", e["id"], e, after)   # 이력을 먼저 남긴다: history 가 깨져 실패하면 지출도 그대로
+    e.update(after)
+    warnings = []
+    if dup:
+        ids = ", ".join(str(i) for i in dup)
+        warnings.append(f"중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 ({ids}번)")
+    return e, warnings
+
+
+def _set_deleted(store, eid, deleted, action):
+    e = store.get_expense(eid)
+    if bool(e.get("deleted")) == deleted:
+        state = "이미 삭제된" if deleted else "삭제되지 않은"
+        raise ValueError(f"{state} 지출입니다: {e['id']}번")
+    _check_unlocked(store, e["date"], e["id"])
+    store.record(action, e["id"], e, dict(e, deleted=deleted))   # 이력 먼저(실패하면 그대로)
+    e["deleted"] = deleted
+    return e
 
 
 def delete_expense(store, eid):
-    raise NotImplementedError("이 함수를 구현한다")
+    """삭제 표시만 한다(규약 6-1). 돌려주는 값: 지출."""
+    return _set_deleted(store, eid, True, "delete")
 
 
 def restore_expense(store, eid):
-    raise NotImplementedError("이 함수를 구현한다")
+    """삭제 표시를 지운다. 돌려주는 값: 지출."""
+    return _set_deleted(store, eid, False, "restore")
 
 
 def undo_last_edit(store, eid):
