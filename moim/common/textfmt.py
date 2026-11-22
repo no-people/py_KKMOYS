@@ -38,10 +38,11 @@ def table(headers, rows, total=None, numeric=None):
             widths[i] = max(widths[i], width(cell))
 
     def render_row(cells, align_numeric):
-        return "  ".join(
+        rendered = "  ".join(
             pad(cell, widths[i], right=(align_numeric and i in num_cols))
             for i, cell in enumerate(cells)
         )
+        return rendered.rstrip()
 
     sep = "  ".join("-" * w for w in widths)
     lines = [render_row(str_headers, align_numeric=False), sep]
@@ -50,9 +51,7 @@ def table(headers, rows, total=None, numeric=None):
     if str_total is not None:
         lines.append(sep)
         lines.append(render_row(str_total, align_numeric=True))
-
     return "\n".join(lines)
-
 
 def bar_chart(data, bar_width=30, char="#"):
     """{이름: 값} 을 글자 막대그래프로."""
