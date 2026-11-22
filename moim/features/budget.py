@@ -18,9 +18,49 @@ from ..common.csvio import read_csv_rows
 from ..common.queries import active_members, category_totals, period_total
 
 
+def _month_period(month):
+    """문자열 또는 정수 튜플의 실제 달을 검사한다."""
+    try:
+        ym = dates.parse_month(month) if isinstance(month, str) else month
+        if (not isinstance(ym, tuple) or len(ym) != 2
+                or any(type(part) is not int for part in ym)):
+            raise ValueError
+        return dates.month_range(*ym)
+    except (TypeError, ValueError):
+        raise ValueError(f"실제 있는 달이어야 합니다(YYYY-MM): {month!r}") from None
+
+
+def _amount(value):
+    try:
+        return money.to_won(value)
+    except (TypeError, ValueError, ArithmeticError):
+        raise ValueError(f"금액 형식이 잘못되었습니다: {value!r}") from None
+
+
+def _payments(store):
+    """키가 없거나 null 인 옛 자료는 빈 목록으로 읽는다."""
+    payments = store.data.get("payments")
+    if payments is None:
+        return []
+    if not isinstance(payments, list):
+        raise ValueError("자료 파일의 payments 형식이 잘못되었습니다")
+    return payments
+
+
 def month_status(store, cfg, month, today=None):
     """이번 달 예산 상태. today 를 주면 그날까지의 지출만 센다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    try:
+        limit = _amount(cfg["budget"]["monthly"])
+    except (KeyError, TypeError):
+        raise ValueError("설정 파일에 budget.monthly 월 예산이 필요합니다") from None
+    if limit < 0:
+        raise ValueError("월 예산은 0원 이상이어야 합니다")
+    if today is not None:
+        end = min(end, dates.parse(today))
+    spent = period_total(store, start, end) if end >= start else 0
+    return {"budget": limit, "spent": spent, "remaining": limit - spent,
+            "over": spent > limit}
 
 
 def category_status(store, cfg, month):
@@ -35,12 +75,27 @@ def forecast(store, month, today):
 
 def record_payment(store, date, member, amount, memo=""):
     """회비 입금을 기록한다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    day = dates.fmt(date)
+    won = _amount(amount)
+    if won <= 0:
+        raise ValueError("회비 입금은 1원 이상이어야 합니다")
+    if store.member(member) is None:
+        raise ValueError(f"명부에 없는 회원입니다: {member}")
+    payments = _payments(store)
+    payment = {"date": day, "member": member, "amount": won,
+               "memo": memo, "source": "manual"}
+    payments.append(payment)
+    store.data["payments"] = payments
+    return payment
 
 
 def treasury_balance(store, until=None):
     """모임 통장 잔고 = 회비 입금 합계 - 지출 합계(until 날짜까지)."""
-    raise NotImplementedError("이 함수를 구현한다")
+    start = dates.parse("0001-01-01")
+    end = dates.parse(until) if until is not None else dates.parse("9999-12-31")
+    income = sum(_amount(p["amount"]) for p in _payments(store)
+                 if dates.in_period(p["date"], start, end))
+    return income - period_total(store, start, end)
 
 
 def unpaid(store, cfg, month):
