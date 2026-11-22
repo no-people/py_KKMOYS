@@ -35,12 +35,59 @@ class TestPersonPaid(unittest.TestCase):
         self.store = SimpleNamespace(
             data={
                 "expenses": [
-                    {"id": 1, "date": "2026-11-01", "payer": "민기슬", "amount": 12000, "deleted": False},
-                    {"id": 2, "date": "2026-11-15", "payer": "강동휘", "amount": 8000},
-                    {"id": 3, "date": "2026-11-30", "payer": "민기슬", "amount": 5000, "deleted": False},
-                    {"id": 4, "date": "2026-11-20", "payer": "민기슬", "amount": 99000, "deleted": True},
-                    {"id": 6, "date": "2026-10-31", "payer": "오재원", "amount": 30000},
-                    {"id": 7, "date": "2026-12-01", "payer": "염승민", "amount": 25000},
+                    {
+                        "id": 1,
+                        "date": "2026-11-01",
+                        "payer": "민기슬",
+                        "amount": 12000,
+                        "members": ["민기슬", "강동휘", "오재원"],
+                        "deleted": False,
+                    },
+                    {
+                        "id": 2,
+                        "date": "2026-11-15",
+                        "payer": "강동휘",
+                        "amount": 8000,
+                        "members": ["민기슬", "강동휘", "오재원", "염승민"],
+                    },
+                    {
+                        "id": 3,
+                        "date": "2026-11-30",
+                        "payer": "민기슬",
+                        "amount": 5000,
+                        "members": ["민기슬", "강동휘"],
+                        "deleted": False,
+                    },
+                    {
+                        "id": 4,
+                        "date": "2026-11-20",
+                        "payer": "민기슬",
+                        "amount": 99000,
+                        "members": ["민기슬"],
+                        "deleted": True,
+                    },
+                    {
+                        "id": 5,
+                        "date": "2026-11-18",
+                        "payer": "손가인",
+                        "amount": 40000,
+                        "members": ["손가인", "민기슬"],
+                        "deleted": True,
+                    },
+                    {
+                        "id": 6,
+                        "date": "2026-10-31",
+                        "payer": "오재원",
+                        "amount": 30000,
+                        "members": ["오재원", "민기슬"],
+                    },
+                    {
+                        "id": 7,
+                        "date": "2026-12-01",
+                        "payer": "염승민",
+                        "amount": 25000,
+                        "members": ["염승민", "민기슬"],
+                    },
                 ]
             }
         )
@@ -67,6 +114,15 @@ class TestPersonPaid(unittest.TestCase):
             queries.person_paid(f3_store, "2026-11-10", "2026-11-20"),
             {"이서연": 6000, "김민수": 9000},
         )
+
+    def test_person_paid_excludes_person_with_only_deleted_expenses(self):
+        result = queries.person_paid(self.store, "2026-11-01", "2026-11-30")
+        self.assertNotIn("손가인", result)
+
+    def test_person_paid_excludes_member_who_did_not_pay(self):
+        result = queries.person_paid(self.store, "2026-11-01", "2026-11-30")
+        self.assertNotIn("오재원", result)
+        self.assertNotIn("염승민", result)
 
     def test_person_paid_legacy_store_without_expenses_key(self):
         legacy_store = SimpleNamespace(data={})

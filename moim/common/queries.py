@@ -37,6 +37,7 @@ def person_paid(store, start, end):
         totals[payer] = totals.get(payer, 0) + int(exp["amount"])
     return totals
 
+
 def is_member_active(store, name, on):
     """그날 모임 회원인가. 가입일 이상, 탈퇴일 이하(탈퇴일 당일까지는 회원). 담당: 기능 5"""
     member = store.member(name)
