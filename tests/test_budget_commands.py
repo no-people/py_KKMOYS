@@ -1,8 +1,11 @@
 """실제 CLI에서 파일 저장, 조회의 불변성, 잘못된 인자를 검사한다."""
+import argparse
+import copy
 import json
 
 from helpers import NAMES, StoreCase
 from moim import cli
+from moim.commands import budget
 
 
 class BudgetCommandsTest(StoreCase):
@@ -52,14 +55,18 @@ class BudgetCommandsTest(StoreCase):
     def test_invalid_payment_does_not_save(self):
         with open(self.store.path, "rb") as stream:
             before = stream.read()
+        args = cli.build_parser().parse_args(["budget", "pay", "--date", "2026-11-02",
+                                             "--member", NAMES[0], "--amount", "0"])
+        original = copy.deepcopy(self.store.data)
         with self.assertRaises(ValueError):
-            self.run_command("pay", "--date", "2026-11-02", "--member", NAMES[0],
-                             "--amount", "0")
+            cli.run(args, self.cfg, self.store, out=lambda line: None)
+        self.assertEqual(self.store.data, original)
         with open(self.store.path, "rb") as stream:
             self.assertEqual(stream.read(), before)
 
     def test_parser_requires_month_and_payment_fields(self):
-        parser = cli.build_parser()
+        parser = argparse.ArgumentParser()
+        budget.add_parser(parser.add_subparsers(dest="group"), cli.period_args)
         for args in [["budget"], ["budget", "status"], ["budget", "pay"]]:
             with self.subTest(args=args), self.assertRaises(SystemExit) as error:
                 parser.parse_args(args)
