@@ -76,9 +76,20 @@ class CliErrorTest(StoreCase):
         self.assertEqual(err.count("\n"), 1)
 
     def test_missing_command(self):
-        code, _, err = self.call()
+        code, out, err = self.call()
         self.assertEqual(code, 1)
+        self.assertEqual(out, "")
         self.assertTrue(err.startswith("오류: 명령 형식이 잘못되었습니다: "))
+        self.assertEqual(err.count("\n"), 1)
+
+    def test_unknown_option_in_group(self):
+        # 명령 묶음(하위 파서)의 인자 오류도 ArgParser 를 물려받아 같은 형식이다
+        code, out, err = self.call("exp", "--nope")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertTrue(err.startswith("오류: 명령 형식이 잘못되었습니다: "))
+        self.assertIn("--nope", err)
+        self.assertEqual(err.count("\n"), 1)
 
     def test_help_still_exits_0(self):
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
@@ -125,7 +136,14 @@ class CliErrorTest(StoreCase):
     def test_data_file_not_utf8(self):
         with open(self.store.path, "wb") as f:
             f.write('{"members": [], "expenses": [], "memo": "회비"}'.encode("cp949"))
-        self.assert_error(self.call("exp"), "파일의 글자 인코딩을 읽을 수 없습니다(UTF-8 이어야 합니다)")
+        self.assert_error(self.call("exp"),
+                          f"자료 파일의 글자 인코딩을 읽을 수 없습니다(UTF-8 이어야 합니다): {self.store.path}")
+
+    def test_unicode_error_in_command(self):
+        # 명령 안에서 읽은 다른 파일(예: CSV)의 인코딩 오류는 경로 없이 안내한다
+        bad = UnicodeDecodeError("utf-8", b"\xc8", 0, 1, "invalid start byte")
+        with mock.patch.object(expenses, "run", side_effect=bad):
+            self.assert_error(self.call("exp"), "파일의 글자 인코딩을 읽을 수 없습니다(UTF-8 이어야 합니다)")
 
     def test_bug_is_not_hidden(self):
         # 규격 밖의 예외(코드 버그)는 삼키지 않는다: 트레이스백으로 원인을 찾게 둔다

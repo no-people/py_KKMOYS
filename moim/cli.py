@@ -46,11 +46,13 @@ def error_reason(exc):
 
 
 def load_json_file(loader, path, what):
-    """설정·자료 파일을 읽는다. JSON 이 깨졌으면 어느 파일 몇째 줄인지 담은 ValueError."""
+    """설정·자료 파일을 읽는다. JSON 이 깨졌거나 UTF-8 이 아니면 어느 파일인지 담은 ValueError."""
     try:
         return loader(path)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{what} 형식이 잘못되었습니다: {path} ({exc.lineno}번째 줄)") from None
+    except UnicodeDecodeError:
+        raise ValueError(f"{what}의 글자 인코딩을 읽을 수 없습니다(UTF-8 이어야 합니다): {path}") from None
 
 
 def period_args(sp):
