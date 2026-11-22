@@ -29,16 +29,21 @@ def period_total(store, start, end):
 
 def category_of(e):
     """지출의 분류 이름. 분류가 없으면 규약의 "미분류". 담당: 기능 2"""
-    # category 가 None·빈 문자열이거나 키가 없으면 규약 5의 "미분류"
+    # category 가 None·빈 문자열·공백뿐이거나 키가 없으면 규약 5의 "미분류"
     category = e.get("category")
-    if not category:
+    if not category or not category.strip():
         return UNCATEGORIZED
     return category
 
-
 def category_totals(store, start, end):
     """분류별 건수와 금액. {분류: {"count": n, "amount": 원}} 담당: 기능 2"""
-    raise NotImplementedError("기능 2 담당이 구현한다")
+    # 기간(양 끝 포함)·삭제 표시 제외는 expenses_in 이 맡는다(규약 3·6-1)
+    totals = {}
+    for e in expenses_in(store, start, end):
+        item = totals.setdefault(category_of(e), {"count": 0, "amount": 0})
+        item["count"] += 1
+        item["amount"] += e["amount"]
+    return totals
 
 
 def person_paid(store, start, end):

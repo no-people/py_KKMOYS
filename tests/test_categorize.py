@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from datetime import date
 
 from helpers import StoreCase
 
@@ -50,7 +51,78 @@ class CategoryOfTest(unittest.TestCase):
         self.assertEqual(queries.category_of({"category": "식비"}), "식비")
 
     def test_none_empty_missing_is_uncategorized(self):
-        # None, 빈 문자열, 키 없음은 모두 "미분류"
-        for e in ({"category": None}, {"category": ""}, {}):
-            self.assertEqual(queries.category_of(e), UNCATEGORIZED)
+        # None, 빈 문자열, 공백뿐, 키 없음은 모두 "미분류"
+        for e in ({"category": None}, {"category": ""}, {"category": " "}, {"category": "  "}, {}):
+            with self.subTest(e=e):
+                self.assertEqual(queries.category_of(e), UNCATEGORIZED)
         self.assertEqual(UNCATEGORIZED, "미분류")
+
+    def test_fixed_does_not_change_category(self):
+        # category_fixed 는 다시 분류할 때만 쓰고, 분류 이름에는 영향이 없다
+        for fixed in (True, False):
+            with self.subTest(fixed=fixed):
+                self.assertEqual(queries.category_of({"category": "식비", "category_fixed": fixed}), "식비")
+                self.assertEqual(queries.category_of({"category": None, "category_fixed": fixed}), UNCATEGORIZED)
+
+
+class CategoryTotalsTest(StoreCase):
+    """queries.category_totals — 공통모듈_함수규격.md 3-4."""
+
+    # 지출 dict 를 직접 넣는다(분류 이름·삭제 표시를 마음대로 정하려고)
+    def _add(self, eid, day, amount, category=None, deleted=False):
+        self.store.data["expenses"].append(
+            {"id": eid, "date": day, "payer": "김민수", "amount": amount,
+             "members": ["김민수", "이서연"], "category": category, "memo": "", "deleted": deleted})
+
+    def setUp(self):
+        super().setUp()
+        # 규격 3-4 의 예
+        self._add(1, "2026-11-12", 6000, "식비")
+        self._add(2, "2026-11-13", 9000, "교통")
+        self._add(3, "2026-11-14", 2000, None)
+        self._add(4, "2026-11-15", 4000, "식비")
+
+    def test_spec_example(self):
+        self.assertEqual(queries.category_totals(self.store, "2026-11-01", "2026-11-30"),
+                         {"식비": {"count": 2, "amount": 10000},
+                          "교통": {"count": 1, "amount": 9000},
+                          "미분류": {"count": 1, "amount": 2000}})
+
+    def test_period_ends_included(self):
+        # 시작일(11-01)·끝일(11-30) 당일은 들어가고, 10-31·12-01 은 빠진다(규약 3)
+        self._add(5, "2026-11-01", 100, "교통")
+        self._add(6, "2026-11-30", 200, "교통")
+        self._add(7, "2026-10-31", 1000, "교통")
+        self._add(8, "2026-12-01", 1000, "교통")
+        result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result["교통"], {"count": 3, "amount": 9300})
+
+    def test_deleted_excluded(self):
+        # 삭제 표시된 지출은 건수·금액 모두에서 빠진다(규약 6-1)
+        self._add(5, "2026-11-20", 50000, "식비", deleted=True)
+        result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result["식비"], {"count": 2, "amount": 10000})
+
+    def test_blank_category_counted_as_uncategorized(self):
+        # 빈 문자열·공백뿐인 분류도 "미분류" 한 칸으로 모인다(category_of 와 같은 기준)
+        self._add(5, "2026-11-16", 300, "")
+        self._add(6, "2026-11-17", 400, " ")
+        result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result[UNCATEGORIZED], {"count": 3, "amount": 2700})
+        self.assertNotIn(" ", result)
+
+    def test_date_object_args(self):
+        # 날짜 인자는 date 객체로 줘도 같다(규격 0장)
+        self.assertEqual(queries.category_totals(self.store, date(2026, 11, 1), date(2026, 11, 30)),
+                         queries.category_totals(self.store, "2026-11-01", "2026-11-30"))
+
+    def test_no_expenses_is_empty(self):
+        # 기간에 지출이 없으면 빈 dict(지출이 있는 분류만 돌려준다)
+        self.assertEqual(queries.category_totals(self.store, "2026-01-01", "2026-01-31"), {})
+
+    def test_amount_sum_equals_period_total(self):
+        # 분류별 금액의 합은 기간 합계(period_total)와 같다(보고서·정산·내보내기 합계 일치용)
+        result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
+        total = queries.period_total(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(sum(v["amount"] for v in result.values()), total)
+        
