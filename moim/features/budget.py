@@ -13,6 +13,8 @@
 필요하면 함수를 더 만들어도 된다. 다른 기능 파일은 불러 쓰지 않는다.
 """
 
+from decimal import Decimal
+
 from ..common import dates, ledger, money
 from ..common.csvio import read_csv_rows
 from ..common.queries import active_members, category_totals, period_total
@@ -70,7 +72,13 @@ def category_status(store, cfg, month):
 
 def forecast(store, month, today):
     """지금 속도로 쓰면 월말 합계가 얼마가 되는지. (오늘까지 지출 / 지난 일수) x 그달 일수."""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    day = dates.parse(today)
+    if not start <= day <= end:
+        raise ValueError("예측 기준일은 선택한 달 안의 날짜여야 합니다")
+    spent = period_total(store, start, day)
+    estimate = Decimal(spent) * end.day / day.day
+    return money.to_won(estimate)
 
 
 def record_payment(store, date, member, amount, memo=""):

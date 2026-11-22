@@ -5,7 +5,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import money
+from ..common import dates, money
 from ..features import budget
 
 GROUP = 'budget'
@@ -16,6 +16,9 @@ def add_parser(sub, period_args):
     status = grp.add_parser("status", help="설정된 월 예산·사용액·남은 금액")
     status.add_argument("--month", required=True, help="YYYY-MM")
     status.add_argument("--today", help="이 날짜까지의 지출만 조회(YYYY-MM-DD)")
+    forecast = grp.add_parser("forecast", help="기준일까지의 지출 속도로 월말 금액 예측")
+    forecast.add_argument("--month", required=True, help="YYYY-MM")
+    forecast.add_argument("--today", required=True, help="선택한 달 안의 기준일(YYYY-MM-DD)")
     pay = grp.add_parser("pay", help="회비 입금 기록")
     pay.add_argument("--date", required=True, help="YYYY-MM-DD")
     pay.add_argument("--member", required=True, help="명부에 있는 회원 이름")
@@ -39,6 +42,11 @@ def run(c, args, cfg, store, out):
         out(f"회비 입금 기록: {payment['date']} {payment['member']} "
             f"{money.fmt(payment['amount'])}원")
         return True
+    if c == "forecast":
+        estimate = budget.forecast(store, args.month, args.today)
+        out(f"{args.month} 월말 예상 지출: {money.fmt(estimate)}원 "
+            f"(기준일: {dates.fmt(args.today)})")
+        return False
     if c == "balance":
         balance = budget.treasury_balance(store, args.until)
         out(f"통장 잔고: {money.fmt(balance)}원")
