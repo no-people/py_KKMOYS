@@ -1,5 +1,11 @@
+from datetime import date
+import os
+import tempfile
+from types import SimpleNamespace
 import unittest
-from moim.common import textfmt
+
+from moim.common import queries, textfmt
+from moim.common.store import Store
 
 class TestTextfmtTable(unittest.TestCase):
     def test_table_spec_example(self):
@@ -27,3 +33,16 @@ class TestTextfmtTable(unittest.TestCase):
             "식비  점심",
         ])
         self.assertEqual(result, expected)
+
+    def test_table_formats_int_even_when_not_in_numeric(self):
+        result = textfmt.table(["a"], [[1234]])
+        expected = "\n".join([
+            "a    ",
+            "-----",
+            "1,234",
+        ])
+        self.assertEqual(result, expected)
+
+
+if __name__ == "__main__":
+    unittest.main()

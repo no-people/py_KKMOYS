@@ -20,14 +20,14 @@ def table(headers, rows, total=None, numeric=None):
     num_cols = set(numeric) if numeric else set()
     col_count = len(headers)
 
-    def format_cell(val, col_idx):
-        if isinstance(val, int) and not isinstance(val, bool) and col_idx in num_cols:
+    def format_cell(val):
+        if isinstance(val, int) and not isinstance(val, bool):
             return money.fmt(val)
         return str(val)
 
     str_headers = [str(h) for h in headers]
-    str_rows = [[format_cell(row[i], i) for i in range(col_count)] for row in rows]
-    str_total = [format_cell(total[i], i) for i in range(col_count)] if total is not None else None
+    str_rows = [[format_cell(row[i]) for i in range(col_count)] for row in rows]
+    str_total = [format_cell(total[i]) for i in range(col_count)] if total is not None else None
 
     widths = [width(h) for h in str_headers]
     for r in str_rows:
@@ -38,14 +38,10 @@ def table(headers, rows, total=None, numeric=None):
             widths[i] = max(widths[i], width(cell))
 
     def render_row(cells, align_numeric):
-        parts = []
-        for i, cell in enumerate(cells):
-            pad = " " * (widths[i] - width(cell))
-            if align_numeric and i in num_cols:
-                parts.append(pad + cell)
-            else:
-                parts.append(cell + pad)
-        return "  ".join(parts)
+        return "  ".join(
+            pad(cell, widths[i], right=(align_numeric and i in num_cols))
+            for i, cell in enumerate(cells)
+        )
 
     sep = "  ".join("-" * w for w in widths)
     lines = [render_row(str_headers, align_numeric=False), sep]
