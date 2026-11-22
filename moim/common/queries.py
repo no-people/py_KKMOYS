@@ -34,7 +34,7 @@ def person_paid(store, start, end):
     totals = {}
     for exp in expenses_in(store, start, end, include_deleted=False):
         payer = exp["payer"]
-        totals[payer] = totals.get(payer, 0) + int(exp["amount"])
+        totals[payer] = totals.get(payer, 0) + money.to_won(exp["amount"])
     return totals
 
 
