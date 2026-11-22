@@ -40,6 +40,13 @@ class TestActiveMembers(StoreCase):
         self.store.data["members"] = [{"name": KIM, "joined": "2026-09-01"}]
         self.assertEqual(queries.active_members(self.store, "2026-11-15"), [KIM])
 
+    def test_invalid_date_is_rejected_even_with_empty_roster(self):
+        for members in [self.store.data["members"], []]:
+            self.store.data["members"] = members
+            for on in ["2026-13-01", "2026-02-29", "not-a-date"]:
+                with self.subTest(members=members, on=on), self.assertRaises(ValueError):
+                    queries.active_members(self.store, on)
+
     def test_query_does_not_modify_store_and_returns_new_list(self):
         before = copy.deepcopy(self.store.data)
         result = queries.active_members(self.store, "2026-11-15")
@@ -52,3 +59,4 @@ class TestActiveMembers(StoreCase):
             self.assertEqual(queries.active_members(self.store, "2026-11-15"), [PARK])
         self.assertEqual([call.args[1:] for call in active.call_args_list], [
             (LEE, "2026-11-15"), (PARK, "2026-11-15"), (KIM, "2026-11-15")])
+
