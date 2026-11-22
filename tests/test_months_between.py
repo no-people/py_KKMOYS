@@ -20,7 +20,7 @@ class TestMonthsBetween(unittest.TestCase):
             with self.subTest(start=start, end=end), self.assertRaises(ValueError):
                 dates.months_between(start, end)
 
-    def test_leap_year_february(self):
+    def test_month_list_includes_february(self):
         self.assertEqual(
             dates.months_between((2028, 1), (2028, 3)),
             [(2028, 1), (2028, 2), (2028, 3)],
@@ -37,3 +37,16 @@ class TestMonthsBetween(unittest.TestCase):
 
     def test_last_supported_month_does_not_advance_past_end(self):
         self.assertEqual(dates.months_between((9999, 12), (9999, 12)), [(9999, 12)])
+
+    def test_wrong_input_types_and_shapes_have_korean_value_error(self):
+        for value in ["2026-11", [2026, 11], None, (2026,), (2026, 11, 1),
+                      (2026, "11"), (True, 11), (2026, 11.0)]:
+            for start, end in [(value, (2026, 12)), ((2026, 1), value)]:
+                with self.subTest(start=start, end=end):
+                    with self.assertRaisesRegex(ValueError, "정수 튜플"):
+                        dates.months_between(start, end)
+
+    def test_invalid_calendar_values_have_korean_value_error(self):
+        for value in [(0, 11), (10000, 1), (2026, 0), (2026, 13)]:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "실제 있는"):
+                dates.months_between((2026, 1), value)
