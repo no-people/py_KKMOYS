@@ -3,7 +3,7 @@
 import calendar
 import datetime as dt
 
-from .rules import DATE_FORMAT
+from .rules import DATE_FORMAT, MONTH_FORMAT
 
 
 def parse(value):
@@ -50,7 +50,8 @@ def in_period(value, start, end):
 
 
 def month_key(value):
-    raise NotImplementedError("기능 6 담당이 구현한다")
+    """날짜의 달 이름('YYYY-MM')을 돌려준다."""
+    return parse(value).strftime(MONTH_FORMAT)
 
 
 def prev_month(year, month):
