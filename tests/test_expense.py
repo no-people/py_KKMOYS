@@ -322,6 +322,18 @@ class TestManageExpense(StoreCase):
             restore_expense(self.store, b["id"])
         self.assertEqual(self.snapshot(), before)
 
+    def test_restore_revalidates_member(self):
+        from moim.features.expenses import delete_expense, restore_expense
+        e = self.put("2026-11-20", members=("김민수", "박지훈"))
+        delete_expense(self.store, e["id"])
+        self.store.member("박지훈")["left"] = "2026-11-15"   # 삭제된 동안 탈퇴
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, f"{e['id']}번 지출을 되살릴 수 없습니다: 그날 회원이 아닙니다: 박지훈"):
+            restore_expense(self.store, e["id"])
+        self.assertEqual(self.snapshot(), before)   # 삭제 표시·이력 그대로
+        self.store.member("박지훈")["left"] = "2026-11-20"   # 탈퇴일 당일 지출이면 되살릴 수 있다
+        self.assertFalse(restore_expense(self.store, e["id"])["deleted"])
+
     def test_delete_locked_end_day(self):
         from moim.features.expenses import delete_expense
         end = self.put("2026-11-30")

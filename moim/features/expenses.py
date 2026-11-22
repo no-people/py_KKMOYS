@@ -106,6 +106,11 @@ def _set_deleted(store, eid, deleted, action):
         state = "이미 삭제된" if deleted else "삭제되지 않은"
         raise ValueError(f"{state} 지출입니다: {e['id']}번")
     _check_unlocked(store, e["date"], e["id"])
+    if not deleted:   # 삭제된 동안 탈퇴 등으로 명부가 바뀌었을 수 있다(규약 4·6-2): 되살릴 때 다시 검사
+        try:
+            ledger.validate(store, e["date"], e["payer"], e["amount"], e["members"], e.get("weights"))
+        except ValueError as exc:
+            raise ValueError(f"{e['id']}번 지출을 되살릴 수 없습니다: {exc}") from None
     store.record(action, e["id"], e, dict(e, deleted=deleted))   # 이력 먼저(실패하면 그대로)
     e["deleted"] = deleted
     return e
