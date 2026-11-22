@@ -29,16 +29,24 @@ def period_total(store, start, end):
 
 def category_of(e):
     """지출의 분류 이름. 분류가 없으면 규약의 "미분류". 담당: 기능 2"""
-    # category 가 None·빈 문자열이거나 키가 없으면 규약 5의 "미분류"
     category = e.get("category")
-    if not category:
+    if category is None:   # 키 없음·None 은 규약 5의 "미분류"
         return UNCATEGORIZED
-    return category
+    if not isinstance(category, str):   # 손으로 고친 자료의 숫자·목록 등은 번호를 붙여 알린다 (규격 0장 오류 약속)
+        raise ValueError(f"{e.get('id')}번 지출의 분류 형식이 잘못되었습니다: {category!r}")
+    category = category.strip()   # 앞뒤 공백은 떼어 " 식비 " 도 "식비" 와 같은 칸으로 (예산 키와 맞춤)
+    return category or UNCATEGORIZED   # 빈 문자열·공백뿐도 "미분류"
 
 
 def category_totals(store, start, end):
     """분류별 건수와 금액. {분류: {"count": n, "amount": 원}} 담당: 기능 2"""
-    raise NotImplementedError("기능 2 담당이 구현한다")
+    # 기간(양 끝 포함)·삭제 표시 제외는 expenses_in 이 맡는다(규약 3·6-1)
+    totals = {}
+    for e in expenses_in(store, start, end):
+        item = totals.setdefault(category_of(e), {"count": 0, "amount": 0})
+        item["count"] += 1
+        item["amount"] += money.to_won(e["amount"])   # period_total 과 같은 방식으로 원 단위 int
+    return totals
 
 
 def person_paid(store, start, end):
@@ -62,7 +70,12 @@ def is_member_active(store, name, on):
 
 def active_members(store, on):
     """그날의 회원 이름 목록(명부 순서). 담당: 기능 5"""
-    raise NotImplementedError("기능 5 담당이 구현한다")
+    dates.parse(on)  # 빈 명부여도 규격 0장의 잘못된 날짜 거부 약속을 지킨다.
+    return [
+        member["name"]
+        for member in store.data.get("members", [])
+        if is_member_active(store, member["name"], on)
+    ]
 
 
 def expense_shares(e):
