@@ -25,7 +25,7 @@ class BudgetBasicTest(StoreCase):
             self.expense(day, amount, deleted)
         self.assertEqual(budget.month_status(self.store, self.cfg, "2026-11"),
                          {"budget": 100000, "spent": 100000,
-                          "remaining": 0, "over": False})
+                          "remaining": 0, "over": False, "warn": True})
         self.expense("2026-11-30", 1)
         status = budget.month_status(self.store, self.cfg, (2026, 11))
         self.assertEqual((status["remaining"], status["over"]), (-1, True))

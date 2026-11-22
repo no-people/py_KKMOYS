@@ -16,6 +16,8 @@ def add_parser(sub, period_args):
     status = grp.add_parser("status", help="설정된 월 예산·사용액·남은 금액")
     status.add_argument("--month", required=True, help="YYYY-MM")
     status.add_argument("--today", help="이 날짜까지의 지출만 조회(YYYY-MM-DD)")
+    categories = grp.add_parser("categories", help="분류별 예산·사용액·초과 경보")
+    categories.add_argument("--month", required=True, help="YYYY-MM")
     pay = grp.add_parser("pay", help="회비 입금 기록")
     pay.add_argument("--date", required=True, help="YYYY-MM-DD")
     pay.add_argument("--member", required=True, help="명부에 있는 회원 이름")
@@ -32,7 +34,18 @@ def run(c, args, cfg, store, out):
         out(f"{args.month} 월 예산: {money.fmt(status['budget'])}원")
         out(f"사용액: {money.fmt(status['spent'])}원")
         out(f"남은 금액: {money.fmt(status['remaining'])}원")
-        out("예산 초과" if status["over"] else "예산 이내")
+        out("예산 초과" if status["over"] else
+            "예산 주의: 경보 기준 초과" if status["warn"] else "예산 이내")
+        return False
+    if c == "categories":
+        statuses = budget.category_status(store, cfg, args.month)
+        for name, item in statuses.items():
+            label = "초과" if item["over"] else "주의" if item["warn"] else "이내"
+            out(f"{name}: 예산 {money.fmt(item['budget'])}원, "
+                f"사용 {money.fmt(item['spent'])}원, "
+                f"잔액 {money.fmt(item['remaining'])}원 ({label})")
+        if not statuses:
+            out("분류별 예산과 지출이 없습니다.")
         return False
     if c == "pay":
         payment = budget.record_payment(store, args.date, args.member, args.amount, args.memo)
