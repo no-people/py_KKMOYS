@@ -62,8 +62,8 @@ class CategoryOfTest(unittest.TestCase):
         self.assertEqual(queries.category_of({"category": " 식비 "}), "식비")
 
     def test_non_string_category_raises(self):
-        # 문자열이 아닌 참 값은 번호를 붙인 ValueError (규격 0장 오류 약속)
-        for bad in (5, ["식비"], True, 3.0):
+        # 문자열이 아닌 값은 번호를 붙인 ValueError (규격 0장 오류 약속)
+        for bad in (5, ["식비"], True, 3.0, False, 0, []):
             with self.subTest(bad=bad):
                 with self.assertRaisesRegex(ValueError, "7번 지출의 분류 형식"):
                     queries.category_of({"id": 7, "category": bad})
