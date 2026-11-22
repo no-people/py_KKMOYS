@@ -50,6 +50,7 @@ def is_member_active(store, name, on):
 
 def active_members(store, on):
     """그날의 회원 이름 목록(명부 순서). 담당: 기능 5"""
+    dates.parse(on)  # 빈 명부여도 규격 0장의 잘못된 날짜 거부 약속을 지킨다.
     return [
         member["name"]
         for member in store.data.get("members", [])
