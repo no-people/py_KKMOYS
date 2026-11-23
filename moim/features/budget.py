@@ -160,7 +160,12 @@ def dues_deduction(store, cfg, month):
 
 def budget_table(store, cfg, month):
     """예산 대비 실제 표 자료. [(분류, 예산, 실제, 차이)] 마지막 줄은 전체."""
-    raise NotImplementedError("이 함수를 구현한다")
+    categories = category_status(store, cfg, month)
+    rows = [(name, item["budget"], item["spent"], item["remaining"])
+            for name, item in categories.items()]
+    total = month_status(store, cfg, month)
+    rows.append(("전체", total["budget"], total["spent"], total["remaining"]))
+    return rows
 
 
 def suggest_budget(store, month):
