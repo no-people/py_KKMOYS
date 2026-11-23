@@ -4,6 +4,8 @@ import unicodedata
 
 from . import money
 
+from decimal import Decimal, ROUND_HALF_UP
+
 
 def width(text):
     """화면 폭. 한글 등 넓은 글자는 2칸."""
@@ -55,4 +57,39 @@ def table(headers, rows, total=None, numeric=None):
 
 def bar_chart(data, bar_width=30, char="#"):
     """{이름: 값} 을 글자 막대그래프로."""
-    raise NotImplementedError("기능 3 담당이 구현한다")
+    if not data:
+        return ""
+
+    if bar_width < 1:
+        raise ValueError("bar_width는 1 이상이어야 합니다.")
+    if not char:
+        raise ValueError("char는 비어 있을 수 없습니다.")
+
+    def format_val(val):
+        if isinstance(val, int) and not isinstance(val, bool):
+            return money.fmt(val)
+        return str(val)
+
+    items = list(data.items())
+    name_width = max(width(k) for k, _ in items)
+    numeric_vals = [v for _, v in items if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    max_val = max(numeric_vals) if numeric_vals else 0
+
+    lines = []
+    for label, val in items:
+        label_cell = pad(label, name_width, right=False)
+        val_cell = format_val(val)
+
+        if max_val > 0 and isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+            scaled = (Decimal(str(val)) * Decimal(bar_width)) / Decimal(str(max_val))
+            count = int(scaled.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            count = max(1, count)
+            bar_cell = pad(char * count, bar_width, right=False)
+            lines.append(f"{label_cell}  {bar_cell}  {val_cell}")
+        elif max_val > 0:
+            bar_cell = pad("", bar_width, right=False)
+            lines.append(f"{label_cell}  {bar_cell}  {val_cell}")
+        else:
+            lines.append(f"{label_cell}  {val_cell}")
+
+    return "\n".join(lines)
