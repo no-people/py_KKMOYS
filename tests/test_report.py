@@ -313,21 +313,24 @@ class TestTextfmtBarChart(unittest.TestCase):
         )
 
     def test_bar_chart_negative_values(self):
-        # 음수는 0과 동일하게 막대 없이 값만 오른쪽 정렬로 출력
+        # 모두 음수/0일 때는 막대 없이 값만 오른쪽 정렬로 출력
         result = textfmt.bar_chart({"a": -100, "b": 0}, bar_width=10)
         self.assertEqual(result, "a  -100\nb     0")
 
+        # 양수와 음수가 섞인 경우
+        mixed = textfmt.bar_chart({"a": 10, "b": -5}, bar_width=4)
+        self.assertEqual(mixed, "a  ####  10\nb        -5")
+
     def test_bar_chart_invalid_arguments(self):
+        for bad_width in (0, -5, 2.5, "10", True):
+            with self.assertRaises(ValueError):
+                textfmt.bar_chart({"a": 10}, bar_width=bad_width)
+        for bad_char in ("", "##", "가", 5):
+            with self.assertRaises(ValueError):
+                textfmt.bar_chart({"a": 10}, char=bad_char)
+        # 빈 data여도 잘못된 인자는 ValueError
         with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, bar_width=0)
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, bar_width=-5)
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, char="")
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, char="##")
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, char="가")
+            textfmt.bar_chart({}, bar_width=0)
 
 
 if __name__ == "__main__":
