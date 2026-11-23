@@ -11,17 +11,17 @@ import os
 DEFAULT = {
     "group": "우리 모임",
     "data": "data.json",
-    "members_file": "members.csv",
+    "members_file": "members.txt",
     "rules": "rules.json",
-    "backup_dir": "backups",
+    "backup_dir": "backup",
     "log_dir": "logs",
     "treasurer": "",
     "budget": {
-        "monthly": 0,
+        "monthly": None,
         "by_category": {},
     },
     "dues": {
-        "monthly": 0,
+        "monthly": None,
     },
     "warn_ratio": 0.8,
 }
@@ -40,7 +40,9 @@ def load(path="config.json"):
         if not isinstance(loaded, dict):
             raise ValueError(f"설정 파일 형식이 잘못되었습니다: {path}")
         for k, v in loaded.items():
-            if isinstance(cfg.get(k), dict) and isinstance(v, dict):
+            if isinstance(cfg.get(k), dict):
+                if not isinstance(v, dict):
+                    raise ValueError(f"설정 파일 항목({k}) 형식이 잘못되었습니다: {path}")
                 cfg[k].update(v)
             else:
                 cfg[k] = v
