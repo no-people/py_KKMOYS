@@ -1,10 +1,14 @@
 """기능 2 분류 규칙 테스트. 자료 항목 category_fixed 포함."""
 
+import contextlib
+import io
+import json
 import unittest
 from datetime import date
 
 from helpers import StoreCase
 
+from moim import cli
 from moim.common import queries
 from moim.common.rules import UNCATEGORIZED
 from moim.common.store import Store
@@ -279,3 +283,59 @@ class UncategorizedTest(StoreCase):
             _expense(1, "", None, date="2026-11-20"), _expense(2, "", "식비"), _expense(3, "", " "),
             _expense(4, "", None, deleted=True), _expense(5, "")]
         self.assertEqual([e["id"] for e in categorize.uncategorized(self.store)], [3, 5, 1])
+
+
+class CatCommandTest(StoreCase):
+    """명령 cat — add·remove·list·apply·uncat. cli.main([...]) 으로 실행한다."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = self.path("config.json")
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump({"data": self.store.path, "rules": self.cfg["rules"]}, f, ensure_ascii=False)
+        self.store.data["expenses"] += [_expense(1, "회의 후 저녁"), _expense(2, "현수막", amount=36000),
+                                        _expense(3, "저녁", "장소", category_fixed=True)]
+        self.store.save()
+
+    def cat(self, *argv):
+        lines = []
+        cli.main(["--config", self.config, "cat", *argv], out=lines.append)
+        return lines
+
+    def saved(self):
+        return Store(self.store.path).load().data["expenses"]
+
+    def test_add_list_remove(self):
+        self.assertEqual(self.cat("add", "식비", "--keywords", "저녁", "점심"),
+                         ["규칙 추가: 0. 식비  키워드: 저녁, 점심  우선순위: 0"])
+        self.cat("add", "장소", "--keywords", "대관", "--priority", "1", "--min", "10,000")
+        self.assertEqual(self.cat("list"), ["0. 식비  키워드: 저녁, 점심  우선순위: 0",
+                                            "1. 장소  키워드: 대관  금액: 10,000원~  우선순위: 1"])
+        self.assertEqual(self.cat("remove", "0"), ["규칙 삭제: 0. 식비"])
+        self.assertEqual([r["category"] for r in categorize.load_rules(self.cfg["rules"])], ["장소"])
+
+    def test_list_empty(self):
+        self.assertEqual(self.cat("list"), ["등록된 규칙이 없습니다"])
+
+    def test_bad_input_error_message(self):
+        # 조건 없는 규칙·없는 번호는 "오류: 이유" 한 줄과 종료 코드 1(#56 통합 실행 오류 안내)
+        for argv, reason in ((("add", "식비"), "키워드·낸 사람·금액 범위 가운데 조건을 하나 이상 주세요"),
+                             (("remove", "0"), "0번 규칙이 없습니다")):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    code = cli.main(["--config", self.config, "cat", *argv], out=print)
+                self.assertEqual((code, err.getvalue()), (1, f"오류: {reason}\n"))
+
+    def test_apply_preview_then_apply(self):
+        self.cat("add", "식비", "--keywords", "저녁")
+        self.assertEqual(self.cat("apply", "--preview"),
+                         ["1번: 미분류 → 식비", "(미리 보기) 1건이 바뀝니다. 자료는 바꾸지 않았습니다"])
+        self.assertIsNone(self.saved()[0]["category"])
+        self.assertEqual(self.cat("apply"), ["1번: 미분류 → 식비", "1건을 다시 분류했습니다"])
+        # 저장됨, 고정된 3번은 그대로
+        self.assertEqual([e["category"] for e in self.saved()], ["식비", None, "장소"])
+
+    def test_uncat(self):
+        self.assertEqual(self.cat("uncat"), ["1번  2026-11-12  9,000원  김민수  회의 후 저녁",
+                                             "2번  2026-11-12  36,000원  김민수  현수막", "미분류 2건"])
