@@ -4,8 +4,8 @@ from . import dates, money  # noqa: F401
 from .rules import UNCATEGORIZED  # noqa: F401
 
 def expenses_in(store, start, end, include_deleted=False):
-    start, end = dates.parse(start), dates.parse(end)
     """기간 안의 지출 목록(시작일·끝일 포함). 담당: 기능 3"""
+    start, end = dates.parse(start), dates.parse(end)
     result = []
     for exp in store.data.get("expenses", []):
         if not include_deleted and exp.get("deleted", False):
