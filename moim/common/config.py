@@ -36,7 +36,7 @@ def load(path="config.json"):
             try:
                 loaded = json.load(f)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"설정 파일 형식이 잘못되었습니다: {path}") from exc
+                raise ValueError(f"설정 파일 형식이 잘못되었습니다: {path} ({exc.lineno}번째 줄)") from exc
         if not isinstance(loaded, dict):
             raise ValueError(f"설정 파일 형식이 잘못되었습니다: {path}")
         for k, v in loaded.items():
@@ -46,7 +46,9 @@ def load(path="config.json"):
                 cfg[k] = v
     for key in PATH_KEYS:
         val = cfg.get(key)
-        if val and not os.path.isabs(val):
+        if not isinstance(val, str) or not val:
+            raise ValueError(f"설정 파일 경로 항목({key})이 잘못되었습니다: {path}")
+        if not os.path.isabs(val):
             cfg[key] = os.path.join(base, val)
     return cfg
 

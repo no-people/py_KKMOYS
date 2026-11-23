@@ -51,12 +51,18 @@ class TestConfig(unittest.TestCase):
     def test_load_invalid_json_raises_value_error(self):
         with open(self.cfg_path, "w", encoding="utf-8") as f:
             f.write("{broken json")
+        with self.assertRaises(ValueError) as cm:
+            config.load(self.cfg_path)
+        self.assertIn("1번째 줄", str(cm.exception))
+
+    def test_load_non_dict_or_null_path_raises_value_error(self):
+        with open(self.cfg_path, "w", encoding="utf-8") as f:
+            json.dump(list((1, 2, 3)), f)
         with self.assertRaises(ValueError):
             config.load(self.cfg_path)
 
-    def test_load_non_dict_json_raises_value_error(self):
         with open(self.cfg_path, "w", encoding="utf-8") as f:
-            json.dump(list((1, 2, 3)), f)
+            json.dump({"data": None}, f)
         with self.assertRaises(ValueError):
             config.load(self.cfg_path)
 
