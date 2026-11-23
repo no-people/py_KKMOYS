@@ -13,6 +13,8 @@
 필요하면 함수를 더 만들어도 된다. 다른 기능 파일은 불러 쓰지 않는다.
 """
 
+from decimal import Decimal, InvalidOperation
+
 from ..common import dates, ledger, money
 from ..common.csvio import read_csv_rows
 from ..common.queries import active_members, category_totals, period_total
@@ -47,6 +49,16 @@ def _payments(store):
     return payments
 
 
+def _warn_ratio(cfg):
+    try:
+        ratio = Decimal(str(cfg.get("warn_ratio", 0.8)))
+    except (InvalidOperation, ValueError):
+        raise ValueError("경보 비율은 0부터 1 사이의 수여야 합니다") from None
+    if not ratio.is_finite() or not 0 <= ratio <= 1:
+        raise ValueError("경보 비율은 0부터 1 사이의 수여야 합니다")
+    return ratio
+
+
 def month_status(store, cfg, month, today=None):
     """이번 달 예산 상태. today 를 주면 그날까지의 지출만 센다."""
     start, end = _month_period(month)
@@ -60,12 +72,35 @@ def month_status(store, cfg, month, today=None):
         end = min(end, dates.parse(today))
     spent = period_total(store, start, end) if end >= start else 0
     return {"budget": limit, "spent": spent, "remaining": limit - spent,
-            "over": spent > limit}
+            "over": spent > limit, "warn": spent > limit * _warn_ratio(cfg)}
 
 
 def category_status(store, cfg, month):
     """분류별 예산 상태. {분류: {"budget", "spent", "remaining", "over", "warn"}}"""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    section = cfg.get("budget", {})
+    if not isinstance(section, dict):
+        raise ValueError("budget 설정은 객체여야 합니다")
+    limits = section.get("by_category", {})
+    if not isinstance(limits, dict):
+        raise ValueError("분류별 예산은 이름과 금액을 연결한 객체여야 합니다")
+    ratio = _warn_ratio(cfg)
+    amounts = {}
+    for name, value in limits.items():
+        if not isinstance(name, str) or not name.strip() or name != name.strip():
+            raise ValueError("분류별 예산 이름은 앞뒤 공백 없는 문자열이어야 합니다")
+        amount = _amount(value)
+        if amount < 0:
+            raise ValueError(f"분류별 예산은 0원 이상이어야 합니다: {name}")
+        amounts[name] = amount
+    totals = category_totals(store, start, end)
+    result = {}
+    for name in dict.fromkeys([*amounts, *totals]):
+        limit = amounts.get(name, 0)
+        spent = totals.get(name, {}).get("amount", 0)
+        result[name] = {"budget": limit, "spent": spent, "remaining": limit - spent,
+                        "over": spent > limit, "warn": spent > limit * ratio}
+    return result
 
 
 def forecast(store, month, today):
@@ -100,7 +135,22 @@ def treasury_balance(store, until=None):
 
 def unpaid(store, cfg, month):
     """그달 회비 미납자. 그달 1일 또는 말일에 회원인 사람이 대상. [(이름, 낸 회비, 모자란 금액)]"""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    try:
+        due = _amount(cfg["dues"]["monthly"])
+    except (KeyError, TypeError):
+        raise ValueError("설정 파일에 dues.monthly 월 회비가 필요합니다") from None
+    if due < 0:
+        raise ValueError("월 회비는 0원 이상이어야 합니다")
+    eligible = set(active_members(store, start)) | set(active_members(store, end))
+    paid = {name: 0 for name in eligible}
+    for payment in _payments(store):
+        name = payment["member"]
+        if name in eligible and dates.in_period(payment["date"], start, end):
+            paid[name] += _amount(payment["amount"])
+    return [(m["name"], paid[m["name"]], due - paid[m["name"]])
+            for m in store.data.get("members", [])
+            if m["name"] in eligible and paid[m["name"]] < due]
 
 
 def dues_deduction(store, cfg, month):
@@ -110,7 +160,12 @@ def dues_deduction(store, cfg, month):
 
 def budget_table(store, cfg, month):
     """예산 대비 실제 표 자료. [(분류, 예산, 실제, 차이)] 마지막 줄은 전체."""
-    raise NotImplementedError("이 함수를 구현한다")
+    categories = category_status(store, cfg, month)
+    rows = [(name, item["budget"], item["spent"], item["remaining"])
+            for name, item in categories.items()]
+    total = month_status(store, cfg, month)
+    rows.append(("전체", total["budget"], total["spent"], total["remaining"]))
+    return rows
 
 
 def suggest_budget(store, month):
