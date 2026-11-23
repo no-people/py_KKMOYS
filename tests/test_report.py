@@ -271,5 +271,64 @@ class TestTextfmtTable(unittest.TestCase):
             self.assertEqual(line, line.rstrip())
 
 
+class TestTextfmtBarChart(unittest.TestCase):
+    def test_bar_chart_spec_example(self):
+        data = {"식비": 10000, "교통": 9000, "미분류": 2000}
+        result = textfmt.bar_chart(data, bar_width=10)
+        expected = "\n".join([
+            "식비    ##########  10,000",
+            "교통    #########    9,000",
+            "미분류  ##           2,000",
+        ])
+        self.assertEqual(result, expected)
+
+    def test_bar_chart_half_up_rounding_and_min_one_bar(self):
+        data = {"기준": 10000, "반올림": 2500, "버림": 2400, "최소": 1}
+        lines = textfmt.bar_chart(data, bar_width=10, char="*").splitlines()
+        self.assertEqual(lines[0].count("*"), 10)
+        self.assertEqual(lines[1].count("*"), 3)
+        self.assertEqual(lines[2].count("*"), 2)
+        self.assertEqual(lines[3].count("*"), 1)
+
+    def test_bar_chart_empty_and_all_zero(self):
+        self.assertEqual(textfmt.bar_chart({}), "")
+        # 모두 0일 때는 막대 없이 값만 출력하며 값 열은 오른쪽 정렬
+        self.assertEqual(
+            textfmt.bar_chart({"a": 0, "bb": 0}, bar_width=10),
+            "a   0\nbb  0",
+        )
+
+    def test_bar_chart_single_item_and_width_one(self):
+        single = textfmt.bar_chart({"식비": 5000}, bar_width=10, char="#")
+        self.assertEqual(single, "식비  ##########  5,000")
+
+        width_one = textfmt.bar_chart({"a": 100, "b": 1, "c": 0}, bar_width=1, char="#")
+        self.assertEqual(
+            width_one,
+            "\n".join([
+                "a  #  100",
+                "b  #    1",
+                "c       0",
+            ]),
+        )
+
+    def test_bar_chart_negative_values(self):
+        # 음수는 0과 동일하게 막대 없이 값만 오른쪽 정렬로 출력
+        result = textfmt.bar_chart({"a": -100, "b": 0}, bar_width=10)
+        self.assertEqual(result, "a  -100\nb     0")
+
+    def test_bar_chart_invalid_arguments(self):
+        with self.assertRaises(ValueError):
+            textfmt.bar_chart({"a": 10}, bar_width=0)
+        with self.assertRaises(ValueError):
+            textfmt.bar_chart({"a": 10}, bar_width=-5)
+        with self.assertRaises(ValueError):
+            textfmt.bar_chart({"a": 10}, char="")
+        with self.assertRaises(ValueError):
+            textfmt.bar_chart({"a": 10}, char="##")
+        with self.assertRaises(ValueError):
+            textfmt.bar_chart({"a": 10}, char="가")
+
+
 if __name__ == "__main__":
     unittest.main()
