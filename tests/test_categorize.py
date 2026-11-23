@@ -1,5 +1,7 @@
 """기능 2 분류 규칙 테스트. 자료 항목 category_fixed 포함."""
 
+import contextlib
+import io
 import json
 import unittest
 from datetime import date
@@ -315,11 +317,15 @@ class CatCommandTest(StoreCase):
     def test_list_empty(self):
         self.assertEqual(self.cat("list"), ["등록된 규칙이 없습니다"])
 
-    def test_bad_input_raises(self):
-        # 조건 없는 규칙·없는 번호는 ValueError
-        for argv in (("add", "식비"), ("remove", "0")):
-            with self.subTest(argv=argv), self.assertRaises(ValueError):
-                self.cat(*argv)
+    def test_bad_input_error_message(self):
+        # 조건 없는 규칙·없는 번호는 "오류: 이유" 한 줄과 종료 코드 1(#56 통합 실행 오류 안내)
+        for argv, reason in ((("add", "식비"), "키워드·낸 사람·금액 범위 가운데 조건을 하나 이상 주세요"),
+                             (("remove", "0"), "0번 규칙이 없습니다")):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    code = cli.main(["--config", self.config, "cat", *argv], out=print)
+                self.assertEqual((code, err.getvalue()), (1, f"오류: {reason}\n"))
 
     def test_apply_preview_then_apply(self):
         self.cat("add", "식비", "--keywords", "저녁")
