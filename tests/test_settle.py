@@ -612,14 +612,17 @@ class SettleBalanceCommandTest(StoreCase):
         self.assertEqual(lines[3].split()[:3], [self.LEE, "0", "3,000"])
         self.assertNotIn("999,999", "\n".join(lines))
 
-    def test_table_shape_spec_6_1(self):
-        # 규격 6-1 예와 같은 모양: 머리줄은 왼쪽 정렬, 열마다 - 줄, 숫자 열은 오른쪽 정렬, 한글 2칸
-        self.assertEqual(settle_cmd._table(["이름", "낸 돈"], [["김민수", 9000], ["이서연", 6000]], numeric={1}),
-                         "이름    낸 돈\n------  -----\n김민수  9,000\n이서연  6,000")
-
-    def test_table_negative_and_wide(self):
-        self.assertEqual(settle_cmd._table(["이름", "잔액"], [["김민수", 1234567], ["Al", -5]], numeric={1}),
-                         "이름    잔액\n------  ---------\n김민수  1,234,567\nAl             -5")
+    def test_balance_lines_exact(self):
+        # 명령 출력 전체: textfmt.table(규격 6-1) 모양 — 머리줄 왼쪽 정렬, 열마다 - 줄, 숫자 열 오른쪽 정렬, 한글 2칸
+        rows = {self.KIM: {"paid": 1234567, "owed": 3000, "sent": 0, "received": 0, "balance": 1231567},
+                "Al": {"paid": 0, "owed": 1231567, "sent": 0, "received": 0, "balance": -1231567}}
+        self.assertEqual(settle_cmd.balance_lines(rows), [
+            "이름    낸 돈      부담       보낸 송금  받은 송금  잔액",
+            "------  ---------  ---------  ---------  ---------  ----------",
+            "김민수  1,234,567      3,000          0          0   1,231,567",
+            "Al              0  1,231,567          0          0  -1,231,567",
+            "잔액 합계: 0",
+        ])
 
     def test_empty_period(self):
         _, lines = self.call("balance", "--month", "2026-11")
