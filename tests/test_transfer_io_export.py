@@ -83,6 +83,29 @@ class TestTransferIoExport(StoreCase):
         )
         self.assertEqual(transfer_io.verify_export(self.store, out_path), (False, 12000, 92000))
 
+    def test_category_of_normalization_and_invalid_type(self):
+        self.store.data["expenses"] = [
+            {"id": 1, "date": "2026-11-01", "payer": KIM, "amount": 1000, "category": " 식비 ", "members": list(NAMES)},
+            {"id": 2, "date": "2026-11-02", "payer": LEE, "amount": 2000, "category": "   ", "members": list(NAMES)},
+        ]
+        food_csv = self.path("food.csv")
+        self.assertEqual(transfer_io.export_csv(self.store, food_csv, category="식비"), (1, 1000))
+        with open(food_csv, encoding="utf-8-sig", newline="") as f:
+            (food_row,) = list(csv.DictReader(f))
+        self.assertEqual(food_row["category"], "식비")
+
+        uncat_csv = self.path("uncat.csv")
+        self.assertEqual(transfer_io.export_csv(self.store, uncat_csv, category="미분류"), (1, 2000))
+        with open(uncat_csv, encoding="utf-8-sig", newline="") as f:
+            (uncat_row,) = list(csv.DictReader(f))
+        self.assertEqual(uncat_row["category"], "미분류")
+
+        self.store.data["expenses"].append(
+            {"id": 3, "date": "2026-11-03", "payer": PARK, "amount": 3000, "category": 123, "members": list(NAMES)}
+        )
+        with self.assertRaises(ValueError):
+            transfer_io.export_csv(self.store, self.path("bad.csv"))
+
     def test_cli_export_and_verify_commands(self):
         self.store.save()
         cfg_path = self.path("config.json")
