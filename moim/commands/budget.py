@@ -5,17 +5,42 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
+from ..common import money
+from ..features import budget
+
 GROUP = 'budget'
 
 
 def add_parser(sub, period_args):
-    grp = sub.add_parser(GROUP, help="예산·회비").add_subparsers(dest="cmd")
-    # 예: s = grp.add_parser("list"); s.add_argument("--order", default="id")
-    #     기간을 받는 명령은 period_args(s) 로 --month, --start, --end 를 붙인다.
+    grp = sub.add_parser(GROUP, help="예산·회비").add_subparsers(dest="cmd", required=True)
+    status = grp.add_parser("status", help="설정된 월 예산·사용액·남은 금액")
+    status.add_argument("--month", required=True, help="YYYY-MM")
+    status.add_argument("--today", help="이 날짜까지의 지출만 조회(YYYY-MM-DD)")
+    pay = grp.add_parser("pay", help="회비 입금 기록")
+    pay.add_argument("--date", required=True, help="YYYY-MM-DD")
+    pay.add_argument("--member", required=True, help="명부에 있는 회원 이름")
+    pay.add_argument("--amount", required=True, help="입금액(원)")
+    pay.add_argument("--memo", default="", help="입금 메모")
+    balance = grp.add_parser("balance", help="회비 입금 합계에서 지출을 뺀 통장 잔고")
+    balance.add_argument("--until", help="이 날짜까지 조회(YYYY-MM-DD, 당일 포함)")
     return grp
 
 
 def run(c, args, cfg, store, out):
-    # 예: if c == "list": ...; return False
-    out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
-    return False
+    if c == "status":
+        status = budget.month_status(store, cfg, args.month, args.today)
+        out(f"{args.month} 월 예산: {money.fmt(status['budget'])}원")
+        out(f"사용액: {money.fmt(status['spent'])}원")
+        out(f"남은 금액: {money.fmt(status['remaining'])}원")
+        out("예산 초과" if status["over"] else "예산 이내")
+        return False
+    if c == "pay":
+        payment = budget.record_payment(store, args.date, args.member, args.amount, args.memo)
+        out(f"회비 입금 기록: {payment['date']} {payment['member']} "
+            f"{money.fmt(payment['amount'])}원")
+        return True
+    if c == "balance":
+        balance = budget.treasury_balance(store, args.until)
+        out(f"통장 잔고: {money.fmt(balance)}원")
+        return False
+    raise ValueError(f"모르는 예산·회비 명령입니다: {c}")

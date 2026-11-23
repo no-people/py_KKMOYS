@@ -4,7 +4,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-from moim.common import queries
+from moim.common import queries, textfmt
 from moim.common.store import Store
 
 
@@ -202,6 +202,73 @@ class TestEmptyStoreInvalidDate(unittest.TestCase):
         store = SimpleNamespace(data={"expenses": []})
         with self.assertRaises(ValueError):
             queries.category_totals(store, "2026-13-01", "2026-11-30")
+
+
+class TestTextfmtTable(unittest.TestCase):
+    def test_table_spec_example(self):
+        result = textfmt.table(
+            ["이름", "낸 돈"],
+            [["김민수", 9000], ["이서연", 6000]],
+            total=["합계", 15000],
+            numeric={1},
+        )
+        expected = "\n".join([
+            "이름    낸 돈",
+            "------  ------",
+            "김민수   9,000",
+            "이서연   6,000",
+            "------  ------",
+            "합계    15,000",
+        ])
+        self.assertEqual(result, expected)
+
+    def test_table_without_total_and_numeric(self):
+        result = textfmt.table(["항목", "비고"], [["식비", "점심"]])
+        expected = "\n".join([
+            "항목  비고",
+            "----  ----",
+            "식비  점심",
+        ])
+        self.assertEqual(result, expected)
+
+    def test_table_formats_int_even_when_not_in_numeric(self):
+        result = textfmt.table(["a"], [[1234]])
+        expected = "\n".join([
+            "a",
+            "-----",
+            "1,234",
+        ])
+        self.assertEqual(result, expected)
+
+    def test_table_empty_rows_keeps_header_and_separator(self):
+        result = textfmt.table(["이름", "금액"], [])
+        self.assertEqual(result, "이름  금액\n----  ----")
+
+    def test_table_negative_int_comma_right_aligned(self):
+        result = textfmt.table(["항목", "금액"], [["환불", -1500], ["식비", 300]], numeric={1})
+        expected = "\n".join([
+            "항목  금액",
+            "----  ------",
+            "환불  -1,500",
+            "식비     300",
+        ])
+        self.assertEqual(result, expected)
+
+    def test_table_hangul_counts_two_columns(self):
+        result = textfmt.table(["이름", "메모"], [["가나다라", "ab"], ["Kim", "한글"]])
+        expected = "\n".join([
+            "이름      메모",
+            "--------  ----",
+            "가나다라  ab",
+            "Kim       한글",
+        ])
+        self.assertEqual(result, expected)
+
+    def test_table_no_trailing_space_or_newline(self):
+        result = textfmt.table(["이름", "낸 돈"], [["김민수", 9000]], total=["합계", 9000], numeric={1})
+        self.assertFalse(result.endswith("\n"))
+        for line in result.split("\n"):
+            self.assertEqual(line, line.rstrip())
 
 
 if __name__ == "__main__":
