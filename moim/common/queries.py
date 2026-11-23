@@ -5,6 +5,7 @@ from .rules import UNCATEGORIZED  # noqa: F401
 
 def expenses_in(store, start, end, include_deleted=False):
     """기간 안의 지출 목록(시작일·끝일 포함). 담당: 기능 3"""
+    start, end = dates.parse(start), dates.parse(end)
     result = []
     for exp in store.data.get("expenses", []):
         if not include_deleted and exp.get("deleted", False):
@@ -85,7 +86,12 @@ def active_members(store, on):
 def expense_shares(e):
     """지출 하나의 사람별 부담액. 담당: 기능 4"""
     # 규약 2 "money.split 하나로 나눈다". weights 가 없는 옛 지출은 None(균등)
-    return money.split(e["amount"], e["members"], e["payer"], e.get("weights"))
+    # 금액은 period_total·category_totals·person_paid 와 같이 money.to_won 으로 읽는다(손으로 고친 "6000" 도 같은 값)
+    try:
+        amount = money.to_won(e["amount"])
+    except (ArithmeticError, ValueError):   # "Infinity" 는 Decimal 오류, "NaN" 은 int() 의 영어 메시지라 같은 문구로 맞춘다
+        raise ValueError(f"금액 형식이 잘못되었습니다: {e['amount']}") from None
+    return money.split(amount, e["members"], e["payer"], e.get("weights"))
 
 
 def member_shares(store, start, end):
@@ -110,7 +116,18 @@ def is_locked(store, on):
         locks = []
     elif not isinstance(locks, list):   # 깨진 자료를 "확정 없음"으로 넘기면 규약 6 보호가 풀리므로 거부
         raise ValueError("자료 파일의 locks 형식이 잘못되었습니다")
-    for lock in locks:
-        if dates.in_period(day, lock["start"], lock["end"]):
-            return True
-    return False
+    periods = []
+    for i, lock in enumerate(locks, 1):
+        # 깨진 항목({"start"} 만, null, 없는 날짜)도 KeyError·TypeError 대신 번호를 붙인 ValueError 로 알린다.
+        # 날짜와 상관없이 같은 결과가 나오도록 모든 항목을 먼저 검사한 뒤 판정한다.
+        bad = f"자료 파일의 {i}번째 확정 기간이 잘못되었습니다"
+        if not isinstance(lock, dict) or "start" not in lock or "end" not in lock:
+            raise ValueError(f"{bad}: start·end 가 있어야 합니다: {lock!r}")
+        try:
+            start, end = dates.parse(lock["start"]), dates.parse(lock["end"])
+        except ValueError as exc:
+            raise ValueError(f"{bad}: {exc}") from None
+        if start > end:   # 거꾸로 된 기간은 아무 날도 막지 못하므로 거부
+            raise ValueError(f"{bad}: 시작일이 끝일보다 늦음")
+        periods.append((start, end))
+    return any(dates.in_period(day, start, end) for start, end in periods)   # 규약 3: 양 끝 포함
