@@ -133,6 +133,15 @@ python -m moim --config config.json budget balance
 
 아래 예는 월 예산 100,000원, 분류별 예산 식비 50,000원·교통 10,000원,
 11월 지출 식비 30,000원·교통 15,000원·미분류 500원이 있는 별도 연습 자료 기준입니다.
+앞의 기본 사용 예와 설정이 다르므로, 연습용 `config.json`의 해당 항목을 아래처럼 맞춥니다.
+기존 `data` 등 다른 설정 항목은 유지합니다.
+
+```json
+{
+  "budget": {"monthly": 100000, "by_category": {"식비": 50000, "교통": 10000}},
+  "warn_ratio": 0.8
+}
+```
 
 ```powershell
 python -m moim --config config.json budget categories --month 2026-11
@@ -202,6 +211,9 @@ python -m moim --config config.json budget unpaid --month 2026-11
 분할 입금은 합산하며, 이미 월 회비 이상 낸 사람은 표시하지 않습니다.
 
 ### 은행 거래내역 가져오기
+
+**CSV 읽기 공통 함수(기능 6)가 병합된 뒤 사용할 수 있습니다.**
+현재 main에서는 아직 실행되지 않으며, 아래는 해당 기능이 준비된 후의 사용 예와 예상 출력입니다.
 
 파일 형식은 [은행 거래내역 형식](docs/은행거래내역형식.md)을 따릅니다.
 설정의 `treasurer`가 총무 이름이며, `--treasurer`로 이번 명령의 총무를 지정할 수도 있습니다.

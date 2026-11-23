@@ -5,6 +5,7 @@ from .rules import UNCATEGORIZED  # noqa: F401
 
 def expenses_in(store, start, end, include_deleted=False):
     """기간 안의 지출 목록(시작일·끝일 포함). 담당: 기능 3"""
+    start, end = dates.parse(start), dates.parse(end)
     result = []
     for exp in store.data.get("expenses", []):
         if not include_deleted and exp.get("deleted", False):
@@ -51,7 +52,11 @@ def category_totals(store, start, end):
 
 def person_paid(store, start, end):
     """사람마다 낸 돈 합계. 담당: 기능 3"""
-    raise NotImplementedError("기능 3 담당이 구현한다")
+    totals = {}
+    for exp in expenses_in(store, start, end, include_deleted=False):
+        payer = exp["payer"]
+        totals[payer] = totals.get(payer, 0) + money.to_won(exp["amount"])
+    return totals
 
 
 def is_member_active(store, name, on):
