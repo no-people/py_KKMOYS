@@ -135,3 +135,33 @@ class TestPersonPaid(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class TestEmptyStoreDateValidation(unittest.TestCase):
+    def test_expenses_in_invalid_start_date_empty_store(self):
+        store = SimpleNamespace(data={"expenses": []})
+        with self.assertRaises(ValueError):
+            queries.expenses_in(store, "2026-13-01", "2026-11-30")
+
+    def test_expenses_in_invalid_end_date_empty_store(self):
+        store = SimpleNamespace(data={"expenses": []})
+        with self.assertRaises(ValueError):
+            queries.expenses_in(store, "2026-11-01", "2026-02-30")
+
+    def test_expenses_in_invalid_date_missing_expenses_key(self):
+        store = SimpleNamespace(data={})
+        with self.assertRaises(ValueError):
+            queries.expenses_in(store, "2026-13-01", "2026-11-30")
+
+    def test_period_total_invalid_date_empty_store(self):
+        store = SimpleNamespace(data={"expenses": []})
+        with self.assertRaises(ValueError):
+            queries.period_total(store, "2026-13-01", "2026-11-30")
+
+    def test_person_paid_invalid_date_empty_store(self):
+        store = SimpleNamespace(data={"expenses": []})
+        with self.assertRaises(ValueError):
+            queries.person_paid(store, "2026-13-01", "2026-11-30")
+
+    def test_category_totals_invalid_date_empty_store(self):
+        store = SimpleNamespace(data={"expenses": []})
+        with self.assertRaises(ValueError):
+            queries.category_totals(store, "2026-13-01", "2026-11-30")
