@@ -38,7 +38,16 @@ def list_members(store):
 
 def add_expense(store, date, payer, amount, members, memo="", weights=None, category=None):
     """지출을 추가한다. 돌려주는 값: (지출, 경고 목록)."""
-    raise NotImplementedError("이 함수를 구현한다")
+    # 먼저 검사해 날짜·금액을 바꿔 둔다. 잘못된 금액이 duplicates 에서 다른 오류로 새지 않게 한다.
+    day, won = ledger.validate(store, date, payer, amount, members, weights)
+    # 추가하기 전에 찾는다(추가한 뒤면 새 지출 자신이 걸린다). 삭제 표시 지출은 duplicates 가 뺀다.
+    dup = ledger.duplicates(store, day, payer, won)
+    e = ledger.insert(store, day, payer, won, members, memo=memo, weights=weights, category=category)
+    warnings = []
+    if dup:
+        ids = ", ".join(str(i) for i in dup)
+        warnings.append(f"중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 ({ids}번)")
+    return e, warnings
 
 
 def list_expenses(store, order="id", include_deleted=False):
