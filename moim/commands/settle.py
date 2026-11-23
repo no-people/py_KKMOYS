@@ -5,19 +5,19 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import dates, money, textfmt
+from ..common import money, textfmt
 from ..common.cliutil import _period
 from ..features import settle
 
 GROUP = 'settle'
 
-HEADERS = ["이름", "낸 돈", "부담", "보낸 송금", "받은 송금", "잔액", "구분"]
+HEADERS = ["이름", "낸 돈", "부담", "보낸 송금", "받은 송금", "잔액"]   # 스켈레톤 PDF 8절 정산 결과 화면과 같은 열
 
 
 def add_parser(sub, period_args):
     grp = sub.add_parser(GROUP, help="정산").add_subparsers(dest="cmd", required=True)
-    show = grp.add_parser("show", help="기간의 사람별 낸 돈·부담·송금·잔액과 잔액 합 검사")
-    period_args(show)
+    balance = grp.add_parser("balance", help="기간의 사람별 낸 돈·부담·송금·잔액과 잔액 합계 검사")
+    period_args(balance)
     return grp
 
 
@@ -36,35 +36,24 @@ def _table(headers, rows, numeric):
     return "\n".join([line(headers, False), "  ".join("-" * w for w in widths)] + [line(r, True) for r in cells])
 
 
-def _kind(balance):
-    if balance > 0:
-        return "받을 돈"
-    if balance < 0:
-        return "보낼 돈"
-    return "-"
-
-
-def show_lines(rows, start, end):
-    """balances 결과를 화면 줄 목록으로. 마지막 줄은 잔액 합 검사 결과."""
-    lines = [f"정산 기간: {dates.fmt(start)} ~ {dates.fmt(end)}"]
+def balance_lines(rows):
+    """balances 결과를 화면 줄 목록으로. 마지막 줄은 잔액 합계 검사(규칙대로면 0)."""
     if not rows:
-        lines.append("이 기간에 정산할 지출·송금이 없습니다")
-        return lines
-    body = [[name, r["paid"], r["owed"], r["sent"], r["received"], r["balance"], _kind(r["balance"])]
-            for name, r in rows.items()]
-    lines += _table(HEADERS, body, numeric={1, 2, 3, 4, 5}).split("\n")
+        return ["이 기간에 정산할 지출·송금이 없습니다"]
+    body = [[name, r["paid"], r["owed"], r["sent"], r["received"], r["balance"]] for name, r in rows.items()]
+    lines = _table(HEADERS, body, numeric={1, 2, 3, 4, 5}).split("\n")
     total = settle.balance_sum(rows)
     if total == 0:
-        lines.append("잔액 합: 0원 (정상)")
+        lines.append("잔액 합계: 0")
     else:
-        lines.append(f"경고: 잔액 합이 0이 아닙니다: {money.fmt(total)}원 (자료를 확인하십시오)")
+        lines.append(f"잔액 합계: {money.fmt(total)} (경고: 0이 아닙니다. 자료를 확인하십시오)")
     return lines
 
 
 def run(c, args, cfg, store, out):
-    if c == "show":
+    if c == "balance":
         start, end = _period(args)
-        for line in show_lines(settle.balances(store, start, end), start, end):
+        for line in balance_lines(settle.balances(store, start, end)):
             out(line)
         return False
     raise ValueError(f"모르는 정산 명령입니다: {c}")

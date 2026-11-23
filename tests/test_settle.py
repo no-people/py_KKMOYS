@@ -2,9 +2,12 @@
 
 import datetime as dt
 import json
+from unittest import mock
 
 from helpers import StoreCase
 
+from moim import cli
+from moim.commands import settle as settle_cmd
 from moim.common import money, queries
 from moim.common.store import Store
 from moim.features import settle
@@ -542,6 +545,109 @@ class BalancesTest(StoreCase):
         self._add("2026-11-12", self.KIM, 9000, members="김민수")
         with self.assertRaisesRegex(ValueError, "1번 지출"):
             self.rows()
+
+
+class SettleBalanceCommandTest(StoreCase):
+    """명령 settle balance. 스켈레톤 PDF 8절 정산 결과 화면(열·잔액 합계 줄), 기간 인자, 저장 안 함."""
+
+    KIM, LEE, PARK = "김민수", "이서연", "박지훈"
+
+    def _add(self, date, payer, amount, members=None, deleted=False):
+        self.store.data["expenses"].append({
+            "id": self.store.new_id(), "date": date, "payer": payer, "amount": amount,
+            "members": members or [self.KIM, self.LEE, self.PARK], "weights": None, "category": None,
+            "memo": "", "deleted": deleted, "recurring_id": None})
+
+    def _send(self, date, frm, to, amount):
+        self.store.data["transfers"].append({"date": date, "from": frm, "to": to, "amount": amount})
+
+    def call(self, *argv):
+        lines = []
+        args = cli.build_parser().parse_args(["settle", *argv])
+        changed = cli.run(args, self.cfg, self.store, lines.append)
+        return changed, lines
+
+    def test_month_table(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        changed, lines = self.call("balance", "--month", "2026-11")
+        self.assertFalse(changed)   # 보기만 하므로 저장하지 않는다
+        self.assertEqual(lines[0].split(), ["이름", "낸", "돈", "부담", "보낸", "송금", "받은", "송금", "잔액"])
+        self.assertEqual(lines[2].split(), [self.KIM, "9,000", "3,000", "0", "0", "6,000"])
+        self.assertEqual(lines[3].split(), [self.LEE, "0", "3,000", "0", "0", "-3,000"])
+        self.assertEqual(lines[4].split(), [self.PARK, "0", "3,000", "0", "0", "-3,000"])
+        self.assertEqual(lines[-1], "잔액 합계: 0")
+        self.assertEqual(len(lines), 6)
+
+    def test_start_end_period(self):
+        # 규약 3: 시작일·끝일 포함, 전날·다음 날은 빠짐
+        self._add("2026-11-09", self.KIM, 3000)
+        self._add("2026-11-10", self.KIM, 3000)
+        self._add("2026-11-20", self.LEE, 3000)
+        self._add("2026-11-21", self.LEE, 6000)
+        _, lines = self.call("balance", "--start", "2026-11-10", "--end", "2026-11-20")
+        self.assertEqual(lines[2].split()[:3], [self.KIM, "3,000", "2,000"])
+        self.assertEqual(lines[3].split()[:3], [self.LEE, "3,000", "2,000"])
+
+    def test_remainder_shown(self):
+        # 규약 2: 10,000 / 3 → 낸 사람 박지훈 3,334
+        self._add("2026-11-12", self.PARK, 10000)
+        _, lines = self.call("balance", "--month", "2026-11")
+        self.assertEqual(lines[4].split()[:3], [self.PARK, "10,000", "3,334"])
+        self.assertEqual(lines[-1], "잔액 합계: 0")
+
+    def test_transfer_columns(self):
+        # 이서연이 김민수에게 3,000 보냄 → 송금 열에 보이고 잔액에 반영
+        self._add("2026-11-12", self.KIM, 9000)
+        self._send("2026-11-15", self.LEE, self.KIM, 3000)
+        _, lines = self.call("balance", "--month", "2026-11")
+        self.assertEqual(lines[2].split(), [self.KIM, "9,000", "3,000", "0", "3,000", "3,000"])
+        self.assertEqual(lines[3].split(), [self.LEE, "0", "3,000", "3,000", "0", "0"])
+        self.assertEqual(lines[-1], "잔액 합계: 0")
+
+    def test_deleted_expense_not_shown(self):
+        # 규약 6-1: 삭제 표시된 지출은 정산에서 빠진다
+        self._add("2026-11-12", self.KIM, 9000)
+        self._add("2026-11-13", self.LEE, 999999, deleted=True)
+        _, lines = self.call("balance", "--month", "2026-11")
+        self.assertEqual(lines[3].split()[:3], [self.LEE, "0", "3,000"])
+        self.assertNotIn("999,999", "\n".join(lines))
+
+    def test_table_shape_spec_6_1(self):
+        # 규격 6-1 예와 같은 모양: 머리줄은 왼쪽 정렬, 열마다 - 줄, 숫자 열은 오른쪽 정렬, 한글 2칸
+        self.assertEqual(settle_cmd._table(["이름", "낸 돈"], [["김민수", 9000], ["이서연", 6000]], numeric={1}),
+                         "이름    낸 돈\n------  -----\n김민수  9,000\n이서연  6,000")
+
+    def test_table_negative_and_wide(self):
+        self.assertEqual(settle_cmd._table(["이름", "잔액"], [["김민수", 1234567], ["Al", -5]], numeric={1}),
+                         "이름    잔액\n------  ---------\n김민수  1,234,567\nAl             -5")
+
+    def test_empty_period(self):
+        _, lines = self.call("balance", "--month", "2026-11")
+        self.assertEqual(lines, ["이 기간에 정산할 지출·송금이 없습니다"])
+
+    def test_nonzero_sum_warning(self):
+        rows = {self.KIM: {"paid": 100, "owed": 0, "sent": 0, "received": 0, "balance": 100}}
+        with mock.patch.object(settle, "balances", return_value=rows):
+            _, lines = self.call("balance", "--month", "2026-11")
+        self.assertEqual(lines[-1], "잔액 합계: 100 (경고: 0이 아닙니다. 자료를 확인하십시오)")
+
+    def test_period_required(self):
+        with self.assertRaisesRegex(ValueError, "기간을 지정"):
+            self.call("balance")
+
+    def test_bad_month(self):
+        with self.assertRaisesRegex(ValueError, "달 형식"):
+            self.call("balance", "--month", "2026-13")
+
+    def test_subcommand_required(self):
+        with self.assertRaisesRegex(cli.UsageError, "cmd"):
+            cli.build_parser().parse_args(["settle"])
+
+    def test_does_not_change_data(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        before = repr(self.store.data)
+        self.call("balance", "--month", "2026-11")
+        self.assertEqual(repr(self.store.data), before)
 
 
 class TransfersFormatTest(StoreCase):
