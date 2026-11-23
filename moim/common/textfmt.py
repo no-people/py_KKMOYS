@@ -1,5 +1,6 @@
 """글자 표와 막대그래프. 보고서·지출 목록·정산·예산 명령이 함께 쓴다."""
 
+from decimal import Decimal
 import unicodedata
 
 from . import money
@@ -53,25 +54,43 @@ def table(headers, rows, total=None, numeric=None):
         lines.append(render_row(str_total, align_numeric=True))
     return "\n".join(lines)
 
+
 def bar_chart(data, bar_width=30, char="#"):
     """{이름: 값} 을 글자 막대그래프로."""
     if not data:
         return ""
 
-    entries = [(str(k), money.to_won(v)) for k, v in data.items()]
-    max_val = max(val for _, val in entries)
-    max_name_w = max(width(name) for name, _ in entries)
+    if bar_width < 1:
+        raise ValueError("bar_width는 1 이상이어야 합니다.")
+    if not char or width(char) != 1:
+        raise ValueError("char는 화면 폭 1칸짜리 문자여야 합니다.")
+
+    def format_val(val):
+        if isinstance(val, int) and not isinstance(val, bool):
+            return money.fmt(val)
+        return str(val)
+
+    items = list(data.items())
+    name_width = max(width(k) for k, _ in items)
+    formatted_vals = [format_val(v) for _, v in items]
+    value_width = max(width(v) for v in formatted_vals)
+    numeric_vals = [v for _, v in items if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    max_val = max(numeric_vals) if numeric_vals else 0
 
     lines = []
-    for name, val in entries:
-        padded_name = pad(name, max_name_w, right=False)
-        formatted_val = money.fmt(val)
-        if max_val > 0 and val > 0:
-            bar_len = money.to_won(val * bar_width / max_val)
-            bar_len = max(1, min(bar_width, bar_len))
-            bar = char * bar_len
-            lines.append(f"{padded_name}  {bar}  {formatted_val}")
+    for (label, val), val_str in zip(items, formatted_vals):
+        label_cell = pad(label, name_width, right=False)
+        val_cell = pad(val_str, value_width, right=True)
+
+        if max_val > 0 and isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+            scaled = (Decimal(str(val)) * Decimal(bar_width)) / Decimal(str(max_val))
+            count = max(1, money.to_won(scaled))
+            bar_cell = pad(char * count, bar_width, right=False)
+            lines.append(f"{label_cell}  {bar_cell}  {val_cell}")
+        elif max_val > 0:
+            bar_cell = pad("", bar_width, right=False)
+            lines.append(f"{label_cell}  {bar_cell}  {val_cell}")
         else:
-            lines.append(f"{padded_name}  {formatted_val}")
+            lines.append(f"{label_cell}  {val_cell}")
 
     return "\n".join(lines)

@@ -5,7 +5,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import money, textfmt
+from ..common import dates, money, textfmt
 from ..features import budget
 
 GROUP = 'budget'
@@ -16,6 +16,9 @@ def add_parser(sub, period_args):
     status = grp.add_parser("status", help="설정된 월 예산·사용액·남은 금액")
     status.add_argument("--month", required=True, help="YYYY-MM")
     status.add_argument("--today", help="이 날짜까지의 지출만 조회(YYYY-MM-DD)")
+    forecast = grp.add_parser("forecast", help="기준일까지의 지출 속도로 월말 금액 예측")
+    forecast.add_argument("--month", required=True, help="YYYY-MM")
+    forecast.add_argument("--today", required=True, help="선택한 달 안의 기준일(YYYY-MM-DD)")
     categories = grp.add_parser("categories", help="분류별 예산·사용액·초과 경보")
     categories.add_argument("--month", required=True, help="YYYY-MM")
     table = grp.add_parser("table", help="분류별 예산 대비 실제 지출 표")
@@ -27,6 +30,9 @@ def add_parser(sub, period_args):
     pay.add_argument("--memo", default="", help="입금 메모")
     balance = grp.add_parser("balance", help="회비 입금 합계에서 지출을 뺀 통장 잔고")
     balance.add_argument("--until", help="이 날짜까지 조회(YYYY-MM-DD, 당일 포함)")
+    bank = grp.add_parser("import-bank", help="은행 CSV에서 지출·회비 가져오기")
+    bank.add_argument("path", help="은행 거래내역 CSV 파일")
+    bank.add_argument("--treasurer", help="출금을 기록할 총무 이름(기본값: 설정 파일)")
     unpaid = grp.add_parser("unpaid", help="그달 1일 또는 말일 회원의 회비 미납 목록")
     unpaid.add_argument("--month", required=True, help="YYYY-MM")
     return grp
@@ -56,6 +62,11 @@ def run(c, args, cfg, store, out):
         out(f"회비 입금 기록: {payment['date']} {payment['member']} "
             f"{money.fmt(payment['amount'])}원")
         return True
+    if c == "forecast":
+        estimate = budget.forecast(store, args.month, args.today)
+        out(f"{args.month} 월말 예상 지출: {money.fmt(estimate)}원 "
+            f"(기준일: {dates.fmt(args.today)})")
+        return False
     if c == "table":
         rows = budget.budget_table(store, cfg, args.month)
         out(textfmt.table(["분류", "예산", "실제", "차이"], rows[:-1],
@@ -67,6 +78,14 @@ def run(c, args, cfg, store, out):
         balance = budget.treasury_balance(store, args.until)
         out(f"통장 잔고: {money.fmt(balance)}원")
         return False
+    if c == "import-bank":
+        result = budget.import_bank(store, args.path, args.treasurer or cfg.get("treasurer"))
+        out(f"은행 가져오기: 지출 {len(result['expenses'])}건, 회비 입금 {result['payments']}건")
+        if result["duplicates"]:
+            out("중복으로 건너뛴 행: " + ", ".join(map(str, result["duplicates"])))
+        for line, error in result["errors"]:
+            out(f"오류 {line}행: {error}")
+        return bool(result["expenses"] or result["payments"])
     if c == "unpaid":
         rows = budget.unpaid(store, cfg, args.month)
         for name, paid, missing in rows:
