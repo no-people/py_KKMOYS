@@ -311,6 +311,15 @@ class ExpenseSharesTest(StoreCase):
         # 규약 1 사사오입: "100.5" → 101 원, 남는 2원은 낸 사람(이서연)부터 목록 순서로
         self.assertEqual(queries.expense_shares(self._e(amount="100.5")), {"김민수": 34, "이서연": 34, "박지훈": 33})
 
+    def test_string_zero_amount_same_as_int_zero(self):
+        self.assertEqual(queries.expense_shares(self._e(amount="0")), queries.expense_shares(self._e(amount=0)))
+
+    def test_string_negative_amount_rejected(self):
+        # 문자열로 바꿔도 음수는 split 이 거부한다(int -1 과 같은 동작)
+        for bad in ("-6000", "-0.5"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "음수"):
+                queries.expense_shares(self._e(amount=bad))
+
     def test_bad_amount_raises_value_error(self):
         for bad in ("abc", "Infinity", "-Infinity", "NaN", "sNaN", None, True):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "^금액 형식이 잘못되었습니다"):
