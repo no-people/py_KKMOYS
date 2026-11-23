@@ -270,6 +270,7 @@ class TestTextfmtTable(unittest.TestCase):
         for line in result.split("\n"):
             self.assertEqual(line, line.rstrip())
 
+
 class TestTextfmtBarChart(unittest.TestCase):
     def test_bar_chart_spec_example(self):
         data = {"식비": 10000, "교통": 9000, "미분류": 2000}
