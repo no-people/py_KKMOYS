@@ -20,15 +20,69 @@ from ..common import dates, ledger, money
 from ..common.queries import expense_shares, expenses_in, is_locked, member_shares, person_paid
 
 
+def _transfers_in(store, start, end):
+    """추가 함수: 기간 안의 송금 기록 [(보낸 사람, 받은 사람, 원)]. "transfers": null 이나 키가 없으면 빈 목록."""
+    items = store.data.get("transfers")
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise ValueError("자료 파일의 transfers 형식이 잘못되었습니다")
+    out = []
+    for i, t in enumerate(items, 1):
+        try:
+            if not dates.in_period(t["date"], start, end):
+                continue
+            frm, to = t["from"], t["to"]
+            for name in (frm, to):
+                if not isinstance(name, str) or not name.strip():
+                    raise ValueError(f"이름이 잘못되었습니다: {name!r}")
+            if frm == to:
+                raise ValueError(f"보낸 사람과 받은 사람이 같습니다: {frm}")
+            won = money.to_won(t["amount"])
+            if won <= 0:
+                raise ValueError(f"송금액은 0원보다 커야 합니다: {won}")
+            out.append((frm, to, won))
+        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+            raise ValueError(f"{i}번째 송금 기록이 잘못되었습니다: {exc}") from None
+    return out
+
+
+def _ordered(store, names):
+    """추가 함수: 명부 순서대로, 명부에 없는 이름은 그 뒤에 가나다순."""
+    roster = [m.get("name") for m in store.data.get("members") or [] if isinstance(m, dict)]
+    first = [n for n in roster if n in names]
+    return first + sorted(n for n in names if n not in first)
+
+
 def balances(store, start, end):
     """사람마다 낸 돈, 부담할 돈, 이미 보낸·받은 송금, 잔액.
-    잔액 = 낸 돈 - 부담할 돈 + 보낸 송금 - 받은 송금. 양수면 받을 돈, 음수면 보낼 돈."""
-    raise NotImplementedError("이 함수를 구현한다")
+    잔액 = 낸 돈 - 부담할 돈 + 보낸 송금 - 받은 송금. 양수면 받을 돈, 음수면 보낼 돈.
+
+    돌려주는 값: {이름: {"paid", "owed", "sent", "received", "balance"}} (모두 원 단위 int).
+    기간(양 끝 포함) 안에 낸 사람·부담한 사람·송금한 사람만 들어가고, 순서는 명부 순서다.
+    삭제 표시된 지출은 빠진다(규약 6-1). 부담은 지출마다 money.split 으로 나눈 값의 합(member_shares).
+    """
+    start, end = dates.parse(start), dates.parse(end)
+    if start > end:
+        raise ValueError(f"기간이 잘못되었습니다(시작일이 끝일보다 늦음): {dates.fmt(start)} ~ {dates.fmt(end)}")
+    paid = person_paid(store, start, end)
+    owed = member_shares(store, start, end)
+    sent, received = {}, {}
+    for frm, to, won in _transfers_in(store, start, end):
+        sent[frm] = sent.get(frm, 0) + won
+        received[to] = received.get(to, 0) + won
+    rows = {}
+    for name in _ordered(store, set(paid) | set(owed) | set(sent) | set(received)):
+        row = {"paid": paid.get(name, 0), "owed": owed.get(name, 0),
+               "sent": sent.get(name, 0), "received": received.get(name, 0)}
+        row["balance"] = row["paid"] - row["owed"] + row["sent"] - row["received"]
+        rows[name] = row
+    return rows
 
 
 def balance_sum(rows):
     """모든 사람 잔액의 합. 규칙대로라면 항상 0이다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    return sum(row["balance"] for row in rows.values())
 
 
 def minimal_transfers(rows):
