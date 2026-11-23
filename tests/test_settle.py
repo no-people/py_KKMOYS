@@ -8,7 +8,7 @@ from helpers import StoreCase
 
 from moim import cli
 from moim.commands import settle as settle_cmd
-from moim.common import money, queries
+from moim.common import ledger, money, queries
 from moim.common.store import Store
 from moim.features import settle
 
@@ -157,6 +157,39 @@ class IsLockedTest(StoreCase):
             self.store.data["locks"] = bad
             with self.assertRaisesRegex(ValueError, "locks 형식"):
                 queries.is_locked(self.store, "2026-11-15")
+
+    def test_broken_lock_item_raises(self):
+        # 항목 하나가 깨져도 KeyError·TypeError 가 아니라 몇 번째인지 담은 ValueError
+        for bad in ({"start": "2026-12-01"}, {"end": "2026-12-31"}, None, "2026-12-01", [],
+                    {"start": "2026-12-01", "end": None}, {"start": "2026-12-01", "end": "2026-12-32"}):
+            self.store.data["locks"] = [{"start": "2026-10-01", "end": "2026-10-31"}, bad]
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "2번째 확정 기간"):
+                queries.is_locked(self.store, "2026-12-15")
+
+    def test_broken_item_found_even_if_earlier_lock_matches(self):
+        # 앞 기간에 드는 날짜여도 뒤의 깨진 항목을 넘기지 않는다(날짜에 따라 결과가 달라지지 않게)
+        self.store.data["locks"] = [{"start": "2026-11-01", "end": "2026-11-30"}, {"start": "2026-12-01"}]
+        with self.assertRaisesRegex(ValueError, "2번째 확정 기간"):
+            queries.is_locked(self.store, "2026-11-15")
+
+    def test_reversed_lock_raises(self):
+        self.store.data["locks"] = [{"start": "2026-11-30", "end": "2026-11-01"}]
+        with self.assertRaisesRegex(ValueError, "1번째 확정 기간.*시작일이 끝일보다 늦음"):
+            queries.is_locked(self.store, "2026-11-15")
+
+    def test_single_day_lock(self):
+        # 시작일과 끝일이 같은 하루짜리 확정 기간
+        self.store.data["locks"] = [{"start": "2026-11-15", "end": "2026-11-15"}]
+        self.assertTrue(queries.is_locked(self.store, "2026-11-15"))
+        self.assertFalse(queries.is_locked(self.store, "2026-11-16"))
+
+    def test_insert_with_broken_lock_raises_value_error(self):
+        # 호출부(ledger.insert, 기능 1·5·6 이 씀)에도 KeyError 대신 ValueError 로 올라가고 자료는 그대로
+        self.store.data["locks"] = [{"start": "2026-11-01"}]
+        with self.assertRaisesRegex(ValueError, "1번째 확정 기간"):
+            ledger.insert(self.store, "2026-12-05", "김민수", 1000, ["김민수", "이서연"])
+        self.assertEqual((self.store.data["expenses"], self.store.data["next_id"]), ([], 1))
+        self.assertEqual(self.store.data["history"], [])
 
     def test_bad_date_raises(self):
         with self.assertRaises(ValueError):
