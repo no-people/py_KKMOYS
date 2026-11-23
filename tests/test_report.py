@@ -171,9 +171,8 @@ class TestEmptyStoreDateValidation(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-class TestEmptyStoreDateValidation(unittest.TestCase):
+
+class TestEmptyStoreInvalidDate(unittest.TestCase):
     def test_expenses_in_invalid_start_date_empty_store(self):
         store = SimpleNamespace(data={"expenses": []})
         with self.assertRaises(ValueError):
@@ -203,3 +202,7 @@ class TestEmptyStoreDateValidation(unittest.TestCase):
         store = SimpleNamespace(data={"expenses": []})
         with self.assertRaises(ValueError):
             queries.category_totals(store, "2026-13-01", "2026-11-30")
+
+
+if __name__ == "__main__":
+    unittest.main()
