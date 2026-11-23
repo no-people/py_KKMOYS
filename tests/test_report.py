@@ -1,11 +1,14 @@
+import argparse
 from datetime import date
 import os
 import tempfile
 from types import SimpleNamespace
 import unittest
 
+from moim.commands import report as report_cmd
 from moim.common import queries, textfmt
 from moim.common.store import Store
+from moim.features import report as report_feature
 
 
 class TestExpensesIn(unittest.TestCase):
@@ -171,7 +174,6 @@ class TestEmptyStoreDateValidation(unittest.TestCase):
         )
 
 
-
 class TestEmptyStoreInvalidDate(unittest.TestCase):
     def test_expenses_in_invalid_start_date_empty_store(self):
         store = SimpleNamespace(data={"expenses": []})
@@ -269,6 +271,185 @@ class TestTextfmtTable(unittest.TestCase):
         self.assertFalse(result.endswith("\n"))
         for line in result.split("\n"):
             self.assertEqual(line, line.rstrip())
+
+
+class TestReportFeature(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir_obj = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmpdir_obj.name, "data.json"))
+        self.store.data["expenses"] = [
+            {
+                "id": 1,
+                "date": "2026-11-01",
+                "payer": "민기슬",
+                "amount": 5000,
+                "members": ["민기슬", "강동휘"],
+                "category": "식비",
+                "memo": "11월 첫날 커피",
+                "deleted": False,
+            },
+            {
+                "id": 2,
+                "date": "2026-11-12",
+                "payer": "이서연",
+                "amount": 6000,
+                "members": ["이서연", "김민수"],
+                "category": "식비",
+                "memo": "점심 식사",
+                "deleted": False,
+            },
+            {
+                "id": 3,
+                "date": "2026-11-13",
+                "payer": "김민수",
+                "amount": 9000,
+                "members": ["김민수", "이서연"],
+                "category": "교통",
+                "memo": "지하철 정산",
+                "deleted": False,
+            },
+            {
+                "id": 4,
+                "date": "2026-11-30",
+                "payer": "민기슬",
+                "amount": 8000,
+                "members": ["민기슬", "오재원"],
+                "category": None,
+                "memo": "말일 간식",
+                "deleted": False,
+            },
+            {
+                "id": 5,
+                "date": "2026-11-15",
+                "payer": "강동휘",
+                "amount": 50000,
+                "members": ["강동휘"],
+                "category": "식비",
+                "memo": "삭제된 지출",
+                "deleted": True,
+            },
+            {
+                "id": 6,
+                "date": "2026-10-20",
+                "payer": "김민수",
+                "amount": 10000,
+                "members": ["김민수", "이서연"],
+                "category": "식비",
+                "memo": "10월 지출",
+                "deleted": False,
+            },
+            {
+                "id": 7,
+                "date": "2026-12-01",
+                "payer": "민기슬",
+                "amount": 7000,
+                "members": ["민기슬"],
+                "category": "교통",
+                "memo": "12월 첫날",
+                "deleted": False,
+            },
+        ]
+
+    def tearDown(self):
+        self.tmpdir_obj.cleanup()
+
+    def test_period_summary_boundaries_and_excludes_deleted(self):
+        summary = report_feature.period_summary(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(summary["total"], 28000)
+        self.assertEqual(
+            summary["by_category"],
+            {
+                "식비": 11000,
+                "교통": 9000,
+                "미분류": 8000,
+            },
+        )
+        self.assertEqual(
+            summary["by_person"],
+            {
+                "민기슬": 13000,
+                "이서연": 6000,
+                "김민수": 9000,
+            },
+        )
+
+    def test_monthly_totals_and_month_over_month(self):
+        totals = report_feature.monthly_totals(self.store, (2026, 10), (2026, 12))
+        self.assertEqual(
+            totals,
+            {
+                "2026-10": 10000,
+                "2026-11": 28000,
+                "2026-12": 7000,
+            },
+        )
+
+        mom = report_feature.month_over_month(self.store, (2026, 11))
+        self.assertEqual(mom["month"], "2026-11")
+        self.assertEqual(mom["prev_month"], "2026-10")
+        self.assertEqual(mom["total"], 28000)
+        self.assertEqual(mom["prev_total"], 10000)
+        self.assertEqual(mom["diff"], 18000)
+
+    def test_top_expenses_and_biggest_day(self):
+        top2 = report_feature.top_expenses(self.store, "2026-11-01", "2026-11-30", limit=2)
+        self.assertEqual([e["id"] for e in top2], [3, 4])
+
+        biggest = report_feature.biggest_day(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(biggest, ("2026-11-13", 9000))
+
+    def test_weekday_and_week_totals(self):
+        wd = report_feature.weekday_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(sum(wd.values()), 28000)
+
+        wk = report_feature.week_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(sum(wk.values()), 28000)
+        self.assertIn("2026-11-09", wk)
+
+    def test_month_report_and_save_report(self):
+        text = report_feature.month_report(self.store, (2026, 11))
+        self.assertIn("2026-11", text)
+        self.assertIn("28,000", text)
+        self.assertIn("식비", text)
+        self.assertIn("민기슬", text)
+
+        out_file = os.path.join(self.tmpdir_obj.name, "reports", "2026-11.txt")
+        saved_path = report_feature.save_report(self.store, (2026, 11), out_file)
+        self.assertEqual(saved_path, out_file)
+        self.assertTrue(os.path.exists(out_file))
+        with open(out_file, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), text)
+
+    def test_search_filters_and_excludes_deleted(self):
+        found = report_feature.search(
+            self.store,
+            start="2026-11-01",
+            end="2026-11-30",
+            payer="민기슬",
+            min_amount=6000,
+            max_amount=9000,
+            keyword="간식",
+        )
+        self.assertEqual([e["id"] for e in found], [4])
+
+        deleted_search = report_feature.search(self.store, keyword="삭제된")
+        self.assertEqual(deleted_search, [])
+
+    def test_empty_period_results(self):
+        empty_summary = report_feature.period_summary(self.store, "2026-01-01", "2026-01-31")
+        self.assertEqual(empty_summary["total"], 0)
+        self.assertEqual(empty_summary["by_category"], {})
+        self.assertEqual(empty_summary["by_person"], {})
+        self.assertIsNone(report_feature.biggest_day(self.store, "2026-01-01", "2026-01-31"))
+        self.assertEqual(report_feature.top_expenses(self.store, "2026-01-01", "2026-01-31"), [])
+
+    def test_command_report_run_returns_false_and_outputs(self):
+        lines = []
+        args = argparse.Namespace(start="2026-11-01", end="2026-11-30")
+        changed = report_cmd.run("summary", args, {}, self.store, lines.append)
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("28000원", lines[0])
 
 
 if __name__ == "__main__":

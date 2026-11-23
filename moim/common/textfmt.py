@@ -55,4 +55,23 @@ def table(headers, rows, total=None, numeric=None):
 
 def bar_chart(data, bar_width=30, char="#"):
     """{이름: 값} 을 글자 막대그래프로."""
-    raise NotImplementedError("기능 3 담당이 구현한다")
+    if not data:
+        return ""
+
+    entries = [(str(k), money.to_won(v)) for k, v in data.items()]
+    max_val = max(val for _, val in entries)
+    max_name_w = max(width(name) for name, _ in entries)
+
+    lines = []
+    for name, val in entries:
+        padded_name = pad(name, max_name_w, right=False)
+        formatted_val = money.fmt(val)
+        if max_val > 0 and val > 0:
+            bar_len = money.to_won(val * bar_width / max_val)
+            bar_len = max(1, min(bar_width, bar_len))
+            bar = char * bar_len
+            lines.append(f"{padded_name}  {bar}  {formatted_val}")
+        else:
+            lines.append(f"{padded_name}  {formatted_val}")
+
+    return "\n".join(lines)
