@@ -135,7 +135,22 @@ def treasury_balance(store, until=None):
 
 def unpaid(store, cfg, month):
     """그달 회비 미납자. 그달 1일 또는 말일에 회원인 사람이 대상. [(이름, 낸 회비, 모자란 금액)]"""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    try:
+        due = _amount(cfg["dues"]["monthly"])
+    except (KeyError, TypeError):
+        raise ValueError("설정 파일에 dues.monthly 월 회비가 필요합니다") from None
+    if due < 0:
+        raise ValueError("월 회비는 0원 이상이어야 합니다")
+    eligible = set(active_members(store, start)) | set(active_members(store, end))
+    paid = {name: 0 for name in eligible}
+    for payment in _payments(store):
+        name = payment["member"]
+        if name in eligible and dates.in_period(payment["date"], start, end):
+            paid[name] += _amount(payment["amount"])
+    return [(m["name"], paid[m["name"]], due - paid[m["name"]])
+            for m in store.data.get("members", [])
+            if m["name"] in eligible and paid[m["name"]] < due]
 
 
 def dues_deduction(store, cfg, month):
