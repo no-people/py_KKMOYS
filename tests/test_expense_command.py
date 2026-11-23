@@ -1,5 +1,6 @@
-"""명령 exp — add·list. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
+"""명령 exp — add·list·edit·delete·restore. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
 
+import copy
 import os
 import sys
 import unittest
@@ -97,8 +98,7 @@ class TestExpenseCommand(StoreCase):
     def test_list_deleted_hidden_unless_all(self):
         self.add("2026-11-12", "김민수", "36000")
         self.add("2026-11-13", "이서연", "1000", "이서연")
-        from moim.features.expenses import delete_expense
-        delete_expense(self.store, 1)
+        self.cmd("delete", "1")
         _, lines = self.cmd("list")
         self.assertEqual([ln.split()[0] for ln in lines[1:-1]], ["2"])
         self.assertEqual(lines[-1], "모두 1건, 합계 1,000원")
@@ -149,11 +149,116 @@ class TestExpenseCommand(StoreCase):
         with self.assertRaises(ValueError):
             self.cmd("list", "--end", "2026-11-30")   # 시작일 없음
 
+    # --- edit
+    def test_edit_shows_changes(self):
+        self.add("2026-11-12", "김민수", "36000", "김민수;이서연", "--memo", "저녁")
+        changed, lines = self.cmd("edit", "1", "--amount", "30,000", "--memo", "점심", "--payer", "김민수")
+        self.assertTrue(changed)
+        self.assertEqual(lines, ["지출 수정 1번", "  금액: 36,000원 → 30,000원", "  메모: 저녁 → 점심"])
+        self.assertEqual([h["action"] for h in self.store.data["history"]], ["add", "edit"])
+
+    def test_edit_members_weights_equal(self):
+        self.add("2026-11-12", "김민수", "30000", "김민수;이서연")
+        _, lines = self.cmd("edit", "1", "--members", "김민수;박지훈", "--weights", "김민수=2;박지훈=1")
+        self.assertEqual(lines[1:], ["  참여자: 김민수;이서연 → 김민수;박지훈",
+                                     "  비율: 없음(똑같이 나눔) → 김민수=2;박지훈=1"])
+        _, lines = self.cmd("edit", "1", "--equal")
+        self.assertEqual(lines[1:], ["  비율: 김민수=2;박지훈=1 → 없음(똑같이 나눔)"])
+        self.assertIsNone(self.expenses()[0]["weights"])
+
+    def test_edit_category_and_date(self):
+        self.add("2026-11-12", "김민수", "1000", "김민수")
+        _, lines = self.cmd("edit", "1", "--category", "식비", "--date", "2026-11-13")
+        self.assertEqual(lines[1:], ["  날짜: 2026-11-12 → 2026-11-13", "  분류: - → 식비"])
+
+    def test_edit_same_value(self):
+        self.add("2026-11-12", "김민수", "1000", "김민수", "--memo", "저녁")
+        self.assertEqual(self.cmd("edit", "1", "--memo", "저녁")[1], ["지출 수정 1번", "  바뀐 항목 없음"])
+
+    def test_edit_duplicate_warning(self):
+        self.add("2026-11-12", "김민수", "1000", "김민수")
+        self.add("2026-11-12", "김민수", "2000", "김민수")
+        _, lines = self.cmd("edit", "2", "--amount", "1000")
+        self.assertEqual(lines[-1], "경고: 중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 (1번)")
+
+    def test_edit_errors_change_nothing(self):
+        self.add("2026-11-12", "김민수", "1000", "김민수")
+        before = copy.deepcopy(self.expenses())
+        for argv in (("edit", "1"), ("edit", "9", "--memo", "x"), ("edit", "1", "--amount", "0"),
+                     ("edit", "1", "--weights", "김민수"), ("edit", "1", "--weights", " ")):
+            with self.subTest(argv=argv):
+                with self.assertRaises(ValueError):
+                    self.cmd(*argv)
+        self.assertEqual(self.expenses(), before)
+        self.assertEqual(len(self.store.data["history"]), 1)
+
+    def test_edit_old_data_no_fake_change(self):
+        self.store.data["expenses"].append(
+            {"id": 1, "date": "2026-11-12", "payer": "김민수", "amount": 1000, "members": ["김민수"]})
+        self.store.data["next_id"] = 2
+        self.assertEqual(self.cmd("edit", "1", "--amount", "2000")[1], ["지출 수정 1번", "  금액: 1,000원 → 2,000원"])
+
+    def test_locked_edit_delete_keep_data(self):
+        self.add("2026-11-30", "김민수", "1000", "김민수")
+        self.add("2026-12-01", "김민수", "2000", "김민수")
+        self.store.data["locks"] = [{"start": "2026-11-01", "end": "2026-11-30"}]
+        before = copy.deepcopy(self.store.data)
+        for argv in (("edit", "1", "--memo", "x"), ("delete", "1"), ("edit", "2", "--date", "2026-11-30")):
+            with self.subTest(argv=argv):
+                with self.assertRaises(ValueError) as cm:
+                    self.cmd(*argv)
+                self.assertEqual(str(cm.exception), "정산이 확정된 기간입니다: 2026-11-30")
+        self.assertEqual(self.store.data, before)
+
+    def test_edit_deleted_rejected(self):
+        self.add()
+        self.cmd("delete", "1")
+        before = copy.deepcopy(self.store.data)
+        with self.assertRaises(ValueError):
+            self.cmd("edit", "1", "--memo", "x")
+        self.assertEqual(self.store.data, before)
+
+    def test_eid_must_be_int(self):
+        from moim.cli import UsageError
+        for argv in (("edit", "abc", "--memo", "x"), ("delete", "1.5"), ("restore", "")):
+            with self.subTest(argv=argv):
+                with self.assertRaises(UsageError) as cm:
+                    self.cmd(*argv)
+                self.assertIn("명령 형식이 잘못되었습니다", str(cm.exception))
+
+    def test_weights_and_equal_together_rejected(self):
+        from moim.cli import UsageError
+        with self.assertRaises(UsageError):
+            self.cmd("edit", "1", "--weights", "김민수=1", "--equal")
+
+    # --- delete·restore
+    def test_delete_restore(self):
+        self.add()
+        changed, lines = self.cmd("delete", "1")
+        self.assertEqual((changed, lines),
+                         (True, ["지출 삭제 1번: 2026-11-12 김민수 36,000원 (3명) (삭제 표시만, exp restore 1 로 되살림)"]))
+        self.assertTrue(self.expenses()[0]["deleted"])
+        changed, lines = self.cmd("restore", "1")
+        self.assertEqual((changed, lines), (True, ["지출 되살림 1번: 2026-11-12 김민수 36,000원 (3명)"]))
+        self.assertFalse(self.expenses()[0]["deleted"])
+        self.assertEqual([h["action"] for h in self.store.data["history"]], ["add", "delete", "restore"])
+
+    def test_delete_twice_and_locked(self):
+        self.add()
+        self.cmd("delete", "1")
+        with self.assertRaises(ValueError):
+            self.cmd("delete", "1")
+        self.store.data["locks"] = [{"start": "2026-11-01", "end": "2026-11-30"}]
+        with self.assertRaises(ValueError) as cm:
+            self.cmd("restore", "1")
+        self.assertEqual(str(cm.exception), "정산이 확정된 기간입니다: 2026-11-12")
+        self.assertTrue(self.expenses()[0]["deleted"])
+
     # --- 하위 명령 없음
     def test_no_subcommand(self):
         changed, lines = self.cmd()
         self.assertFalse(changed)
-        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list"))
+        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore"))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
+import copy
+
 from ..common import dates, money
 from ..common.cliutil import _members, _period, _weights
 from ..common.queries import category_of
@@ -12,6 +14,10 @@ from ..common.textfmt import pad, width
 from ..features import expenses
 
 GROUP = 'exp'
+
+# 수정 결과에서 "전 → 후" 로 보여 줄 항목과 이름
+_FIELDS = (("date", "날짜"), ("payer", "낸 사람"), ("amount", "금액"), ("members", "참여자"),
+           ("weights", "비율"), ("memo", "메모"), ("category", "분류"))
 
 
 def add_parser(sub, period_args):
@@ -29,6 +35,19 @@ def add_parser(sub, period_args):
     s.add_argument("--order", default="id", help="정렬 기준 id, date, amount")
     s.add_argument("--all", action="store_true", help="삭제 표시한 지출도 보기")
     period_args(s)
+
+    s = grp.add_parser("edit", help="지출 수정(준 항목만 바꿈)")
+    s.add_argument("eid", type=int, help="지출 번호")
+    for opt, h in (("--date", "날짜"), ("--payer", "낸 사람"), ("--amount", "금액"),
+                   ("--members", '참여자. 예: "김민수;이서연"'), ("--memo", "메모"), ("--category", "분류")):
+        s.add_argument(opt, help=h)
+    w = s.add_mutually_exclusive_group()
+    w.add_argument("--weights", help='사람별 비율. 예: "김민수=2;이서연=1"')
+    w.add_argument("--equal", action="store_true", help="비율을 없애고 똑같이 나눔")
+
+    for name, h in (("delete", "지출 삭제(삭제 표시만)"), ("restore", "삭제한 지출 되살리기")):
+        s = grp.add_parser(name, help=h)
+        s.add_argument("eid", type=int, help="지출 번호")
     return grp
 
 
@@ -86,6 +105,31 @@ def _list(args, store, out):
     out(f"모두 {len(items)}건, 합계{note} {money.fmt(sum(e['amount'] for e in live))}원")
 
 
+def _edit(args, store, out):
+    changes = {k: getattr(args, k) for k in ("date", "payer", "amount", "memo", "category")
+               if getattr(args, k) is not None}
+    if args.members is not None:
+        changes["members"] = _members(args.members)
+    if args.weights is not None:
+        if not args.weights.strip():
+            raise ValueError("비율을 없애려면 --equal 을 쓰십시오")
+        changes["weights"] = _parse_weights(args.weights)
+    if args.equal:
+        changes["weights"] = None
+    before = copy.deepcopy(store.get_expense(args.eid))
+    e, warnings = expenses.edit_expense(store, args.eid, **changes)
+    out(f"지출 수정 {e['id']}번")
+    # 화면에 보이는 값으로 비교한다(옛 자료의 memo 없음(None)과 "" 은 같은 "-")
+    diffs = [(label, _show(key, before.get(key)), _show(key, e.get(key))) for key, label in _FIELDS]
+    diffs = [d for d in diffs if d[1] != d[2]]
+    for label, old, new in diffs:
+        out(f"  {label}: {old} → {new}")
+    if not diffs:
+        out("  바뀐 항목 없음")
+    for w in warnings:
+        out(f"경고: {w}")
+
+
 def run(c, args, cfg, store, out):
     if c == "add":
         e, warnings = expenses.add_expense(store, args.date, args.payer, args.amount, _members(args.members),
@@ -98,8 +142,19 @@ def run(c, args, cfg, store, out):
     if c == "list":
         _list(args, store, out)
         return False
+    if c == "edit":
+        _edit(args, store, out)
+        return True
+    if c == "delete":
+        e = expenses.delete_expense(store, args.eid)
+        out(f"지출 삭제 {e['id']}번: {_summary(e)} (삭제 표시만, exp restore {e['id']} 로 되살림)")
+        return True
+    if c == "restore":
+        e = expenses.restore_expense(store, args.eid)
+        out(f"지출 되살림 {e['id']}번: {_summary(e)}")
+        return True
     if c is None:
-        out(f"하위 명령을 지정하십시오: {GROUP} add, list (도움말: python -m moim {GROUP} -h)")
+        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore (도움말: python -m moim {GROUP} -h)")
         return False
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c}")
     return False
