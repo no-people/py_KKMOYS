@@ -21,7 +21,7 @@ from ..common.queries import expense_shares, expenses_in, is_locked, member_shar
 
 
 def _transfers_in(store, start, end):
-    """기간 안의 송금 기록 [(보낸 사람, 받은 사람, 원)]. "transfers": null 이나 키가 없으면 빈 목록."""
+    """추가 함수: 기간 안의 송금 기록 [(보낸 사람, 받은 사람, 원)]. "transfers": null 이나 키가 없으면 빈 목록."""
     items = store.data.get("transfers")
     if items is None:
         return []
@@ -48,7 +48,7 @@ def _transfers_in(store, start, end):
 
 
 def _ordered(store, names):
-    """명부 순서대로, 명부에 없는 이름은 그 뒤에 가나다순."""
+    """추가 함수: 명부 순서대로, 명부에 없는 이름은 그 뒤에 가나다순."""
     roster = [m.get("name") for m in store.data.get("members") or [] if isinstance(m, dict)]
     first = [n for n in roster if n in names]
     return first + sorted(n for n in names if n not in first)
