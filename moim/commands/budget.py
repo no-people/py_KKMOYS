@@ -30,6 +30,9 @@ def add_parser(sub, period_args):
     pay.add_argument("--memo", default="", help="입금 메모")
     balance = grp.add_parser("balance", help="회비 입금 합계에서 지출을 뺀 통장 잔고")
     balance.add_argument("--until", help="이 날짜까지 조회(YYYY-MM-DD, 당일 포함)")
+    bank = grp.add_parser("import-bank", help="은행 CSV에서 지출·회비 가져오기")
+    bank.add_argument("path", help="은행 거래내역 CSV 파일")
+    bank.add_argument("--treasurer", help="출금을 기록할 총무 이름(기본값: 설정 파일)")
     unpaid = grp.add_parser("unpaid", help="그달 1일 또는 말일 회원의 회비 미납 목록")
     unpaid.add_argument("--month", required=True, help="YYYY-MM")
     return grp
@@ -75,6 +78,14 @@ def run(c, args, cfg, store, out):
         balance = budget.treasury_balance(store, args.until)
         out(f"통장 잔고: {money.fmt(balance)}원")
         return False
+    if c == "import-bank":
+        result = budget.import_bank(store, args.path, args.treasurer or cfg.get("treasurer"))
+        out(f"은행 가져오기: 지출 {len(result['expenses'])}건, 회비 입금 {result['payments']}건")
+        if result["duplicates"]:
+            out("중복으로 건너뛴 행: " + ", ".join(map(str, result["duplicates"])))
+        for line, error in result["errors"]:
+            out(f"오류 {line}행: {error}")
+        return bool(result["expenses"] or result["payments"])
     if c == "unpaid":
         rows = budget.unpaid(store, cfg, args.month)
         for name, paid, missing in rows:
