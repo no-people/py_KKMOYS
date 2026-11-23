@@ -322,6 +322,227 @@ class TestDeleted(StoreCase):
         self.assertEqual(len(expenses_in(s2, "2026-11-01", "2026-11-30")), 1)
 
 
+class TestManageExpense(StoreCase):
+    """list_expenses·edit_expense·delete_expense·restore_expense. 자료는 ledger.insert 로 만든다."""
+
+    def put(self, date="2026-11-12", payer="김민수", amount=36000, members=("김민수", "이서연"), **kw):
+        from moim.common import ledger
+        return ledger.insert(self.store, date, payer, amount, list(members), **kw)
+
+    def snapshot(self):
+        d = self.store.data
+        return json.dumps([d["expenses"], d["history"], d["next_id"]], ensure_ascii=False)
+
+    def lock_november(self):
+        self.store.data["locks"] = [{"start": "2026-11-01", "end": "2026-11-30"}]
+
+    # --- list_expenses
+    def test_list_orders(self):
+        from moim.features.expenses import list_expenses
+        a = self.put("2026-11-20", amount=3000)
+        b = self.put("2026-11-05", amount=9000)
+        c = self.put("2026-11-05", amount=1000)
+        ids = lambda order: [e["id"] for e in list_expenses(self.store, order=order)]
+        self.assertEqual(ids("id"), [a["id"], b["id"], c["id"]])
+        self.assertEqual(ids("date"), [b["id"], c["id"], a["id"]])   # 같은 날이면 번호순
+        self.assertEqual(ids("amount"), [c["id"], a["id"], b["id"]])
+        with self.assertRaisesRegex(ValueError, "정렬 기준"):
+            list_expenses(self.store, order="payer")
+
+    def test_list_deleted_hidden_unless_asked(self):
+        from moim.features.expenses import list_expenses
+        a = self.put()
+        b = self.put(amount=1000)
+        b["deleted"] = True
+        del a["deleted"]   # deleted 키 없는 옛 지출은 삭제되지 않은 것
+        self.assertEqual([e["id"] for e in list_expenses(self.store)], [a["id"]])
+        self.assertEqual([e["id"] for e in list_expenses(self.store, include_deleted=True)], [a["id"], b["id"]])
+
+    # --- edit_expense
+    def test_edit_amount_and_history(self):
+        from moim.features.expenses import edit_expense
+        e = self.put()
+        got, warnings = edit_expense(self.store, e["id"], amount="6,000원", memo="고침")
+        self.assertIs(got, e)
+        self.assertEqual((e["amount"], e["memo"], warnings), (6000, "고침", []))
+        h = self.store.data["history"][-1]
+        self.assertEqual((h["id"], h["action"], h["before"]["amount"], h["after"]["amount"]),
+                         (e["id"], "edit", 36000, 6000))
+        self.assertEqual(len(self.store.data["history"]), 2)   # add + edit
+
+    def test_edit_date_members_weights(self):
+        from datetime import date
+        from moim.features.expenses import edit_expense
+        e = self.put()
+        edit_expense(self.store, e["id"], date=date(2026, 11, 13), members=["이서연", "박지훈"],
+                     weights={"이서연": 2, "박지훈": 1})
+        self.assertEqual((e["date"], e["members"], e["weights"]),
+                         ("2026-11-13", ["이서연", "박지훈"], {"이서연": 2, "박지훈": 1}))
+        self.assertFalse(e["category_fixed"])
+
+    def test_edit_rejects_and_keeps_data(self):
+        from moim.features.expenses import edit_expense
+        e = self.put()
+        w = self.put(amount=1000, weights={"김민수": 1, "이서연": 1})
+        cases = ((e["id"], {"amount": 0}), (e["id"], {"members": []}), (e["id"], {"payer": "없는사람"}),
+                 (e["id"], {"date": "2026-11-31"}), (e["id"], {"id": 9}), (e["id"], {"deleted": True}),
+                 (e["id"], {}), (99, {"amount": 1000}), (w["id"], {"members": ["김민수"]}))   # 마지막: 비율 불일치
+        for eid, changes in cases:
+            before = self.snapshot()
+            with self.assertRaises(ValueError, msg=(eid, changes)):
+                edit_expense(self.store, eid, **changes)
+            self.assertEqual(self.snapshot(), before, (eid, changes))
+
+    def test_edit_payer_not_in_members_ok(self):
+        from moim.features.expenses import edit_expense
+        e = self.put()
+        edit_expense(self.store, e["id"], payer="박지훈")   # 낸 사람이 참여자가 아니어도 된다(규약 6-2)
+        self.assertEqual((e["payer"], e["members"]), ("박지훈", ["김민수", "이서연"]))
+
+    def test_edit_weights_to_none(self):
+        from moim.features.expenses import edit_expense
+        e = self.put(weights={"김민수": 2, "이서연": 1})
+        edit_expense(self.store, e["id"], weights=None)   # 균등 분배로 돌아감
+        self.assertIsNone(e["weights"])
+        self.assertEqual(self.store.data["history"][-1]["before"]["weights"], {"김민수": 2, "이서연": 1})
+
+    def test_edit_deleted_rejected(self):
+        from moim.features.expenses import edit_expense
+        e = self.put()
+        e["deleted"] = True
+        with self.assertRaisesRegex(ValueError, "삭제된 지출"):
+            edit_expense(self.store, e["id"], amount=1000)
+
+    def test_edit_locked_both_dates(self):
+        from moim.features.expenses import edit_expense
+        inside = self.put("2026-11-30")
+        outside = self.put("2026-12-01")
+        self.lock_november()
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간입니다: 2026-11-30"):
+            edit_expense(self.store, inside["id"], amount=1000)   # 끝일의 지출을 고치기
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간입니다: 2026-11-30"):
+            edit_expense(self.store, inside["id"], date="2026-12-02")   # 확정 기간 밖으로 빼기
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간입니다: 2026-11-30"):
+            edit_expense(self.store, outside["id"], date="2026-11-30")   # 확정 기간 안으로 옮기기
+        self.assertEqual(self.snapshot(), before)
+        edit_expense(self.store, outside["id"], date="2026-12-02")
+        self.assertEqual(outside["date"], "2026-12-02")
+
+    def test_edit_duplicate_warning_excludes_self(self):
+        from moim.features.expenses import edit_expense
+        a = self.put(amount=1000)
+        b = self.put(amount=2000)
+        _, warnings = edit_expense(self.store, a["id"], memo="메모만")
+        self.assertEqual(warnings, [])   # 자기 자신은 중복이 아니다
+        _, warnings = edit_expense(self.store, b["id"], amount=1000)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(f"({a['id']}번)", warnings[0])
+
+    def test_edit_to_after_left_rejected(self):
+        from moim.features.expenses import edit_expense
+        self.store.member("이서연")["left"] = "2026-11-15"
+        e = self.put("2026-11-12")
+        edit_expense(self.store, e["id"], date="2026-11-15")   # 탈퇴일 당일은 된다
+        with self.assertRaisesRegex(ValueError, "이서연"):
+            edit_expense(self.store, e["id"], date="2026-11-16")
+        self.assertEqual(e["date"], "2026-11-15")
+
+    # --- delete_expense / restore_expense
+    def test_delete_restore_cycle(self):
+        from moim.features.expenses import delete_expense, list_expenses, restore_expense
+        e = self.put()
+        self.assertIs(delete_expense(self.store, e["id"]), e)
+        self.assertTrue(e["deleted"])
+        self.assertEqual(list_expenses(self.store), [])
+        self.assertIn(e, self.store.data["expenses"])   # 지우지 않고 표시만(규약 6-1)
+        with self.assertRaisesRegex(ValueError, "이미 삭제된"):
+            delete_expense(self.store, e["id"])
+        restore_expense(self.store, e["id"])
+        self.assertFalse(e["deleted"])
+        with self.assertRaisesRegex(ValueError, "삭제되지 않은"):
+            restore_expense(self.store, e["id"])
+        h = self.store.data["history"]
+        self.assertEqual([x["action"] for x in h], ["add", "delete", "restore"])
+        self.assertEqual((h[1]["before"]["deleted"], h[1]["after"]["deleted"]), (False, True))
+
+    def test_delete_restore_locked(self):
+        from moim.features.expenses import delete_expense, restore_expense
+        a = self.put("2026-11-01")
+        b = self.put("2026-11-02", amount=1000)
+        b["deleted"] = True
+        self.lock_november()
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간입니다: 2026-11-01"):
+            delete_expense(self.store, a["id"])   # 시작일
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간입니다: 2026-11-02"):
+            restore_expense(self.store, b["id"])
+        self.assertEqual(self.snapshot(), before)
+
+    def test_restore_revalidates_member(self):
+        from moim.features.expenses import delete_expense, restore_expense
+        e = self.put("2026-11-20", members=("김민수", "박지훈"))
+        delete_expense(self.store, e["id"])
+        self.store.member("박지훈")["left"] = "2026-11-15"   # 삭제된 동안 탈퇴
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, f"{e['id']}번 지출을 되살릴 수 없습니다: 그날 회원이 아닙니다: 박지훈"):
+            restore_expense(self.store, e["id"])
+        self.assertEqual(self.snapshot(), before)   # 삭제 표시·이력 그대로
+        self.store.member("박지훈")["left"] = "2026-11-20"   # 탈퇴일 당일 지출이면 되살릴 수 있다
+        self.assertFalse(restore_expense(self.store, e["id"])["deleted"])
+
+    def test_delete_locked_end_day(self):
+        from moim.features.expenses import delete_expense
+        end = self.put("2026-11-30")
+        nxt = self.put("2026-12-01", amount=1000)
+        self.lock_november()
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간입니다: 2026-11-30"):
+            delete_expense(self.store, end["id"])
+        self.assertFalse(end["deleted"])
+        delete_expense(self.store, nxt["id"])   # 끝일 다음 날은 된다
+        self.assertTrue(nxt["deleted"])
+
+    # --- #44: is_locked 가 ValueError 를 낼 때
+    def test_corrupt_stored_date_rejected_with_id(self):
+        from moim.features.expenses import delete_expense, edit_expense
+        e = self.put()
+        e["date"] = "2026/11/12"   # 옛 파일의 깨진 날짜
+        before = self.snapshot()
+        for call in (lambda: edit_expense(self.store, e["id"], amount=1000),
+                     lambda: delete_expense(self.store, e["id"])):
+            with self.assertRaisesRegex(ValueError, f"{e['id']}번 지출: 날짜가 잘못되었습니다"):
+                call()
+        self.assertEqual(self.snapshot(), before)
+
+    def test_corrupt_locks_not_treated_as_unlocked(self):
+        from moim.features.expenses import delete_expense
+        e = self.put()
+        self.store.data["locks"] = {"start": "2026-11-01"}   # 목록이 아님
+        with self.assertRaisesRegex(ValueError, "locks 형식"):
+            delete_expense(self.store, e["id"])
+        self.assertFalse(e["deleted"])
+
+    def test_broken_history_keeps_expense(self):
+        from moim.features.expenses import delete_expense, edit_expense
+        e = self.put()
+        self.store.data["history"] = {"broken": 1}
+        for call in (lambda: edit_expense(self.store, e["id"], amount=1000),
+                     lambda: delete_expense(self.store, e["id"])):
+            with self.assertRaises(ValueError):
+                call()
+        self.assertEqual((e["amount"], e["deleted"]), (36000, False))
+
+    def test_does_not_save(self):
+        from moim.common.store import Store
+        from moim.features.expenses import delete_expense, edit_expense
+        e = self.put()
+        self.store.save()
+        edit_expense(self.store, e["id"], amount=1000)
+        delete_expense(self.store, e["id"])
+        saved = Store(self.store.path).load().data["expenses"][0]
+        self.assertEqual((saved["amount"], saved["deleted"]), (36000, False))
+
+
 class TestAddExpense(StoreCase):
     """features.expenses.add_expense — (지출, 경고 목록), 중복 의심 경고, 검사·확정 기간·이력."""
 
