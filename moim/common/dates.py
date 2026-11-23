@@ -64,7 +64,26 @@ def next_month(year, month):
 
 def months_between(start_ym, end_ym):
     """(y,m) 부터 (y,m) 까지 달 목록. 둘 다 포함."""
-    raise NotImplementedError("기능 5 담당이 구현한다")
+    for value in (start_ym, end_ym):
+        if (not isinstance(value, tuple) or len(value) != 2
+                or any(type(part) is not int for part in value)):
+            raise ValueError(f"달은 (연도, 월) 정수 튜플이어야 합니다: {value!r}")
+        try:
+            dt.date(*value, 1)
+        except ValueError:
+            raise ValueError(f"실제 있는 연도와 월이어야 합니다: {value!r}") from None
+    start_year, start_month = start_ym
+    end_year, end_month = end_ym
+    current = (start_year, start_month)
+    end = (end_year, end_month)
+    if current > end:
+        raise ValueError("시작 달은 끝 달보다 늦을 수 없습니다")
+    months = []
+    while True:
+        months.append(current)
+        if current == end:
+            return months
+        current = next_month(*current)
 
 
 def today():

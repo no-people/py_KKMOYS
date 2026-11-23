@@ -15,15 +15,54 @@
 import copy
 import csv
 from ..common import dates, ledger, money
-from ..common.queries import is_locked
+from ..common.queries import is_locked, is_member_active
+
+
+_NAME_BAD_CHARS = ",;="   # 명부 파일(,)·참여자(;)·비율(=) 구분자라 이름에 들어가면 잘린다
 
 
 def add_member(store, name, joined):
-    raise NotImplementedError("이 함수를 구현한다")
+    """명부 끝에 한 사람을 추가한다. 돌려주는 값: 추가한 사람."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"이름이 없습니다: {name!r}")
+    name = name.strip()
+    bad = [c for c in _NAME_BAD_CHARS if c in name]
+    if bad:
+        raise ValueError(f"이름에 쓸 수 없는 글자({' '.join(bad)})가 있습니다: {name}")
+    if name.startswith("#"):   # 명부 파일에서 '#' 줄은 주석으로 건너뛴다
+        raise ValueError(f"이름은 '#' 으로 시작할 수 없습니다: {name}")
+    if store.member(name) is not None:
+        raise ValueError(f"이미 명부에 있는 사람입니다: {name}")
+    m = {"name": name, "joined": dates.fmt(joined), "left": None}
+    store.data["members"].append(m)
+    return m
 
 
 def leave_member(store, name, left):
-    raise NotImplementedError("이 함수를 구현한다")
+    """탈퇴일을 적는다. 탈퇴일 당일까지 회원이다(규약 4). 돌려주는 값: 그 사람."""
+    name = name.strip() if isinstance(name, str) else name
+    m = store.member(name)
+    if m is None:
+        raise ValueError(f"명부에 없는 사람입니다: {name}")
+    if m.get("left"):
+        raise ValueError(f"이미 탈퇴했습니다: {name} ({m['left']})")
+    day = dates.fmt(left)
+    if m.get("joined") and day < dates.fmt(m["joined"]):
+        raise ValueError(f"탈퇴일이 가입일({m['joined']})보다 앞섭니다: {day}")
+    m["left"] = day   # 넣어 본 뒤 회원 기간 판정은 is_member_active 에 맡긴다(규약 4, 규격 3-6)
+    try:
+        later = sorted(e["id"] for e in store.data.get("expenses", [])
+                       if not e.get("deleted")
+                       and (e.get("payer") == name or name in (e.get("members") or []))
+                       and not is_member_active(store, name, e["date"]))
+    except Exception:
+        m["left"] = None
+        raise
+    if later:   # 탈퇴 다음 날부터는 지출에 들어갈 수 없다(규약 4·6-2)
+        m["left"] = None
+        ids = ", ".join(str(i) for i in later)
+        raise ValueError(f"탈퇴일 뒤에 {name}의 지출이 있습니다: {ids}번 (먼저 고치거나 삭제하세요)")
+    return m
 
 
 def load_members_file(store, path):
@@ -33,12 +72,23 @@ def load_members_file(store, path):
 
 
 def list_members(store):
-    raise NotImplementedError("이 함수를 구현한다")
+    """명부 순서의 사람 목록(복사본). 돌려주는 값: [{"name", "joined", "left"}]"""
+    return [{"name": m["name"], "joined": m.get("joined"), "left": m.get("left")}
+            for m in store.data.get("members", [])]
 
 
 def add_expense(store, date, payer, amount, members, memo="", weights=None, category=None):
     """지출을 추가한다. 돌려주는 값: (지출, 경고 목록)."""
-    raise NotImplementedError("이 함수를 구현한다")
+    # 먼저 검사해 날짜·금액을 바꿔 둔다. 잘못된 금액이 duplicates 에서 다른 오류로 새지 않게 한다.
+    day, won = ledger.validate(store, date, payer, amount, members, weights)
+    # 추가하기 전에 찾는다(추가한 뒤면 새 지출 자신이 걸린다). 삭제 표시 지출은 duplicates 가 뺀다.
+    dup = ledger.duplicates(store, day, payer, won)
+    e = ledger.insert(store, day, payer, won, members, memo=memo, weights=weights, category=category)
+    warnings = []
+    if dup:
+        ids = ", ".join(str(i) for i in dup)
+        warnings.append(f"중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 ({ids}번)")
+    return e, warnings
 
 
 _ORDERS = {

@@ -7,6 +7,7 @@ from helpers import StoreCase
 
 from moim.common import money, queries
 from moim.common.store import Store
+from moim.features import settle
 
 
 class SplitWeightsTest(StoreCase):
@@ -212,6 +213,38 @@ class WeightsFormatTest(StoreCase):
         self.assertIsNone(e.get("weights"))
 
 
+class RecurringFormatTest(StoreCase):
+    """자료 항목 recurring. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목" 표의 recurring 행."""
+
+    R = {"id": 1, "day": 31, "payer": "김민수", "amount": 300000, "members": ["김민수", "이서연", "박지훈"],
+         "memo": "정기 대관료", "category": None, "start": "2026-11", "made": ["2026-11"]}
+
+    def test_empty_has_recurring(self):
+        self.assertEqual(Store(self.path("new.json")).load().data["recurring"], [])
+
+    def test_saved_and_loaded(self):
+        self.store.data["recurring"].append(dict(self.R))
+        self.store.save()
+        loaded = Store(self.store.path).load().data["recurring"]
+        self.assertEqual(loaded, [self.R])
+        self.assertIs(type(loaded[0]["day"]), int)
+        self.assertIs(type(loaded[0]["amount"]), int)
+        self.assertEqual(loaded[0]["made"], ["2026-11"])
+        self.assertEqual(loaded[0]["start"], "2026-11")
+        self.assertIsNone(loaded[0]["category"])   # add_recurring 은 분류를 받지 않으므로 None(미분류)
+
+    def test_old_file_without_recurring(self):
+        # recurring 이 생기기 전의 옛 자료 파일도 읽으면 기본값 [] 로 채워진다
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["recurring"], [])
+
+    def test_existing_recurring_kept_on_load(self):
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 2, "recurring": [self.R]}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["recurring"], [self.R])
+
+
 class ExpenseSharesTest(StoreCase):
     """queries.expense_shares. 공통모듈_함수규격.md 3-8, 규약 2."""
 
@@ -363,3 +396,177 @@ class MemberSharesTest(StoreCase):
             with self.subTest(start=start, end=end):
                 with self.assertRaises(ValueError):
                     queries.member_shares(self.store, start, end)
+
+
+class BalancesTest(StoreCase):
+    """settle.balances·balance_sum. 공고문 기능 4 기본 필수, 규약 2·3·6-1, 잔액 = 낸 돈 - 부담 + 보낸 송금 - 받은 송금."""
+
+    S, E = "2026-11-10", "2026-11-20"
+    KIM, LEE, PARK = "김민수", "이서연", "박지훈"
+
+    def _add(self, date, payer, amount, members=None, weights=None, deleted=False):
+        e = {"id": self.store.new_id(), "date": date, "payer": payer, "amount": amount,
+             "members": members or [self.KIM, self.LEE, self.PARK], "weights": weights,
+             "category": None, "memo": "", "deleted": deleted, "recurring_id": None}
+        self.store.data["expenses"].append(e)
+        return e
+
+    def _send(self, date, frm, to, amount):
+        self.store.data["transfers"].append({"date": date, "from": frm, "to": to, "amount": amount})
+
+    def rows(self):
+        return settle.balances(self.store, self.S, self.E)
+
+    def test_basic_balance(self):
+        # 기본 테스트 F4 test_balance 와 같은 값: 9,000 을 3명이 → 김민수 낸 돈 9000, 부담 3000, 잔액 6000
+        self._add("2026-11-12", self.KIM, 9000)
+        r = self.rows()[self.KIM]
+        self.assertEqual((r["paid"], r["owed"], r["sent"], r["received"], r["balance"]), (9000, 3000, 0, 0, 6000))
+        self.assertEqual(self.rows()[self.LEE]["balance"], -3000)
+
+    def test_even_split(self):
+        self._add("2026-11-12", self.LEE, 6000)
+        self.assertEqual({n: r["owed"] for n, r in self.rows().items()}, {self.KIM: 2000, self.LEE: 2000, self.PARK: 2000})
+
+    def test_remainder_to_payer(self):
+        # 규약 2: 10,000 / 3 = 3333 남는 1원은 낸 사람(박지훈)
+        self._add("2026-11-12", self.PARK, 10000)
+        rows = self.rows()
+        self.assertEqual({n: r["owed"] for n, r in rows.items()}, {self.KIM: 3333, self.LEE: 3333, self.PARK: 3334})
+        self.assertEqual(settle.balance_sum(rows), 0)
+
+    def test_weights(self):
+        # 가중치 2:1:1, 101원 → 50·25·26(남는 1원은 낸 사람 박지훈)
+        self._add("2026-11-12", self.PARK, 101, weights={self.KIM: 2, self.LEE: 1, self.PARK: 1})
+        self.assertEqual({n: r["owed"] for n, r in self.rows().items()}, {self.KIM: 50, self.LEE: 25, self.PARK: 26})
+
+    def test_period_ends_included(self):
+        # 규약 3: 시작일·끝일 포함, 밖은 빠짐
+        self._add("2026-11-09", self.KIM, 3000)
+        self._add("2026-11-10", self.KIM, 3000)
+        self._add("2026-11-20", self.KIM, 6000)
+        self._add("2026-11-21", self.KIM, 3000)
+        self.assertEqual(self.rows()[self.KIM]["paid"], 9000)
+
+    def test_deleted_excluded(self):
+        # 규약 6-1: 삭제 표시된 지출은 정산에서 빠진다
+        self._add("2026-11-12", self.KIM, 9000)
+        self._add("2026-11-13", self.LEE, 3000, deleted=True)
+        rows = self.rows()
+        self.assertEqual((rows[self.LEE]["paid"], rows[self.LEE]["owed"]), (0, 3000))
+
+    def test_payer_not_member(self):
+        # 낸 사람이 참여자가 아니면 부담 0, 낸 돈 전액이 받을 돈
+        self._add("2026-11-12", self.KIM, 6000, members=[self.LEE, self.PARK])
+        rows = self.rows()
+        self.assertEqual((rows[self.KIM]["owed"], rows[self.KIM]["balance"]), (0, 6000))
+        self.assertEqual(settle.balance_sum(rows), 0)
+
+    def test_transfers(self):
+        # 이서연이 김민수에게 3,000 보냄 → 이서연 잔액 0, 김민수 6000 - 3000 = 3000
+        self._add("2026-11-12", self.KIM, 9000)
+        self._send("2026-11-15", self.LEE, self.KIM, 3000)
+        rows = self.rows()
+        self.assertEqual((rows[self.LEE]["sent"], rows[self.LEE]["balance"]), (3000, 0))
+        self.assertEqual((rows[self.KIM]["received"], rows[self.KIM]["balance"]), (3000, 3000))
+        self.assertEqual(settle.balance_sum(rows), 0)
+
+    def test_transfer_outside_period_ignored(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        self._send("2026-11-21", self.LEE, self.KIM, 3000)
+        self.assertEqual(self.rows()[self.LEE]["sent"], 0)
+
+    def test_transfers_null_or_missing(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        self.store.data["transfers"] = None
+        self.assertEqual(self.rows()[self.KIM]["balance"], 6000)
+        del self.store.data["transfers"]
+        self.assertEqual(self.rows()[self.KIM]["balance"], 6000)
+
+    def test_transfers_bad_shape(self):
+        self.store.data["transfers"] = {"date": "2026-11-12"}
+        with self.assertRaisesRegex(ValueError, "transfers 형식"):
+            self.rows()
+
+    def test_broken_transfer_item(self):
+        self._send("2026-11-12", self.LEE, self.KIM, 1000)
+        self.store.data["transfers"].append({"date": "2026-11-13", "from": self.LEE, "amount": 1000})
+        with self.assertRaisesRegex(ValueError, "2번째 송금 기록"):
+            self.rows()
+
+    def test_zero_transfer_rejected(self):
+        self._send("2026-11-12", self.LEE, self.KIM, 0)
+        with self.assertRaisesRegex(ValueError, "1번째 송금 기록"):
+            self.rows()
+
+    def test_bad_transfer_names_rejected(self):
+        # 이름이 문자열이 아니거나 비었거나, 자기 자신에게 보낸 기록은 번호를 붙여 거부
+        for frm, to in [(None, self.KIM), (["가"], self.KIM), (self.LEE, " "), (self.KIM, self.KIM)]:
+            self.store.data["transfers"] = [{"date": "2026-11-12", "from": frm, "to": to, "amount": 1000}]
+            with self.subTest(frm=frm, to=to), self.assertRaisesRegex(ValueError, "1번째 송금 기록"):
+                self.rows()
+
+    def test_roster_order(self):
+        # 명부 순서(김민수, 이서연, 박지훈). 낸 순서와 상관없음
+        self._add("2026-11-12", self.PARK, 300)
+        self.assertEqual(list(self.rows()), [self.KIM, self.LEE, self.PARK])
+
+    def test_empty_period(self):
+        self.assertEqual(self.rows(), {})
+        self.assertEqual(settle.balance_sum({}), 0)
+
+    def test_int_values(self):
+        self._add("2026-11-12", self.KIM, 10000)
+        for row in self.rows().values():
+            for v in row.values():
+                self.assertIs(type(v), int)
+
+    def test_many_expenses_sum_zero(self):
+        for i, (payer, amount) in enumerate([(self.KIM, 10001), (self.LEE, 7), (self.PARK, 33333), (self.KIM, 1)]):
+            self._add(f"2026-11-{11 + i}", payer, amount)
+        self._add("2026-11-16", self.LEE, 1000, members=[self.KIM, self.PARK], weights={self.KIM: 3, self.PARK: 1})
+        self._send("2026-11-17", self.PARK, self.KIM, 2500)
+        self.assertEqual(settle.balance_sum(self.rows()), 0)
+
+    def test_bad_dates(self):
+        with self.assertRaises(ValueError):
+            settle.balances(self.store, "2026-11-31", self.E)
+        with self.assertRaisesRegex(ValueError, "기간이 잘못"):
+            settle.balances(self.store, self.E, self.S)
+
+    def test_date_objects(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        self.assertEqual(settle.balances(self.store, dt.date(2026, 11, 10), dt.date(2026, 11, 20))[self.KIM]["balance"], 6000)
+
+    def test_broken_expense_reported(self):
+        self._add("2026-11-12", self.KIM, 9000, members="김민수")
+        with self.assertRaisesRegex(ValueError, "1번 지출"):
+            self.rows()
+
+
+class TransfersFormatTest(StoreCase):
+    """자료 항목 transfers: [{"date", "from", "to", "amount"}]. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목"."""
+
+    def test_empty_has_transfers(self):
+        self.assertEqual(Store(self.path("new.json")).load().data["transfers"], [])
+
+    def test_saved_and_loaded(self):
+        t = {"date": "2026-11-21", "from": "이서연", "to": "김민수", "amount": 3000}
+        self.store.data["transfers"].append(t)
+        self.store.save()
+        loaded = Store(self.store.path).load().data["transfers"]
+        self.assertEqual(loaded, [t])
+        self.assertIs(type(loaded[0]["amount"]), int)
+
+    def test_old_file_without_transfers(self):
+        # transfers 가 생기기 전의 옛 자료 파일도 읽으면 기본값 [] 로 채워진다
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [])
+
+    def test_existing_transfers_kept_on_load(self):
+        # 이미 있는 송금 기록을 기본값으로 덮어쓰지 않는다
+        t = {"date": "2026-11-21", "from": "박지훈", "to": "김민수", "amount": 1}
+        with open(self.path("old.json"), "w", encoding="utf-8") as f:
+            json.dump({"members": [], "expenses": [], "next_id": 1, "transfers": [t]}, f)
+        self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [t])
