@@ -165,5 +165,141 @@ class TestDeleted(StoreCase):
         self.assertEqual(len(expenses_in(s2, "2026-11-01", "2026-11-30")), 1)
 
 
+class TestAddExpense(StoreCase):
+    """features.expenses.add_expense — (지출, 경고 목록), 중복 의심 경고, 검사·확정 기간·이력."""
+
+    NAMES = ["김민수", "이서연", "박지훈"]
+
+    def add(self, date="2026-11-12", payer="김민수", amount="36,000", members=None, **kw):
+        from moim.features import expenses
+        return expenses.add_expense(self.store, date, payer, amount,
+                                    list(members or self.NAMES), **kw)
+
+    def snapshot(self):
+        d = self.store.data
+        return (json.dumps(d["expenses"]), json.dumps(d["history"]), d["next_id"])
+
+    def test_returns_expense_and_empty_warnings(self):
+        e, warnings = self.add(memo="회의 후 저녁")
+        self.assertEqual(warnings, [])
+        self.assertEqual(e, {
+            "id": 1, "date": "2026-11-12", "payer": "김민수", "amount": 36000,
+            "members": self.NAMES, "weights": None, "category": None,
+            "memo": "회의 후 저녁", "deleted": False, "recurring_id": None,
+            "category_fixed": False,
+        })
+        self.assertIs(self.store.get_expense(1), e)
+
+    def test_duplicate_warning_names_earlier_id_only(self):
+        first, _ = self.add()
+        second, warnings = self.add(amount=36000)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("중복 의심", warnings[0])
+        self.assertIn(f"({first['id']}번)", warnings[0])
+        self.assertNotIn(str(second["id"]), warnings[0])
+        self.assertEqual(len(self.store.data["expenses"]), 2)   # 경고만 하고 추가는 한다
+
+    def test_duplicate_warning_lists_all_ids(self):
+        self.add()
+        self.add(amount="36,000원")
+        _, warnings = self.add(amount=36000)
+        self.assertIn("(1, 2번)", warnings[0])
+
+    def test_no_warning_when_any_key_differs(self):
+        self.add()
+        for kw in ({"date": "2026-11-13"}, {"payer": "이서연"}, {"amount": 36001}):
+            _, warnings = self.add(**kw)
+            self.assertEqual(warnings, [], kw)
+
+    def test_no_warning_for_deleted_expense(self):
+        first, _ = self.add()
+        first["deleted"] = True
+        _, warnings = self.add()
+        self.assertEqual(warnings, [])
+
+    def test_invalid_input_adds_nothing(self):
+        from moim.features import expenses
+        cases = (("-3000", self.NAMES), ("0", self.NAMES), ("0.4", self.NAMES), ("abc", self.NAMES),
+                 ("Infinity", self.NAMES), (3000, []), (3000, ["없는사람"]),
+                 (3000, ["김민수", "김민수"]))
+        for amount, members in cases:
+            before = self.snapshot()
+            with self.assertRaises(ValueError, msg=(amount, members)):
+                expenses.add_expense(self.store, "2026-11-12", "김민수", amount, members)
+            self.assertEqual(self.snapshot(), before, (amount, members))
+
+    def test_invalid_date_raises(self):
+        for day in ("2026-11-31", "2026/11/12", "2026-02-29"):
+            before = self.snapshot()
+            with self.assertRaises(ValueError, msg=day):
+                self.add(date=day)
+            self.assertEqual(self.snapshot(), before, day)
+
+    def test_leap_day_accepted(self):
+        e, _ = self.add(date="2028-02-29")
+        self.assertEqual(e["date"], "2028-02-29")
+
+    def test_locked_period_boundary(self):
+        self.store.data["locks"] = [{"start": "2026-11-01", "end": "2026-11-30"}]
+        before = self.snapshot()
+        for day in ("2026-11-01", "2026-11-30"):   # 시작일·끝일 모두 포함(규약 3)
+            with self.assertRaisesRegex(ValueError, f"정산이 확정된 기간입니다: {day}"):
+                self.add(date=day)
+        self.assertEqual(self.snapshot(), before)
+        for day in ("2026-10-31", "2026-12-01"):
+            e, _ = self.add(date=day)
+            self.assertEqual(e["date"], day)
+
+    def test_before_join_rejected(self):
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "김민수"):   # 가입일 2026-09-01 의 전날
+            self.add(date="2026-08-31")
+        self.assertEqual(self.snapshot(), before)
+        e, _ = self.add(date="2026-09-01")   # 가입일 당일부터 회원
+        self.assertEqual(e["date"], "2026-09-01")
+
+    def test_weights_mismatch_adds_nothing(self):
+        before = self.snapshot()
+        for w in ({"김민수": 1}, {"김민수": 1, "이서연": 1, "박지훈": 1}, {"김민수": 0, "이서연": 1}):
+            with self.assertRaises(ValueError, msg=w):
+                self.add(members=["김민수", "이서연"], weights=w)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_left_member_boundary(self):
+        self.store.member("박지훈")["left"] = "2026-11-15"
+        e, _ = self.add(date="2026-11-15")   # 탈퇴일 당일까지 회원
+        self.assertIn("박지훈", e["members"])
+        with self.assertRaisesRegex(ValueError, "박지훈"):
+            self.add(date="2026-11-16")
+        with self.assertRaisesRegex(ValueError, "박지훈"):   # 낸 사람도 그날 회원이어야 한다
+            self.add(date="2026-11-16", payer="박지훈", members=["김민수"])
+
+    def test_history_records_add(self):
+        e, _ = self.add()
+        h = self.store.data["history"]
+        self.assertEqual(len(h), 1)
+        self.assertEqual((h[0]["id"], h[0]["action"], h[0]["before"]), (e["id"], "add", None))
+        self.assertEqual(h[0]["after"]["amount"], 36000)
+
+    def test_does_not_save(self):
+        from moim.common.store import Store
+        self.add()
+        self.assertEqual(Store(self.store.path).load().data["expenses"], [])
+
+    def test_weights_category_and_date_object(self):
+        from datetime import date
+        w = {"김민수": 2, "이서연": 1}
+        e, _ = self.add(date=date(2026, 11, 12), members=["김민수", "이서연"],
+                        weights=w, category="식비")
+        self.assertEqual((e["date"], e["weights"], e["category"]), ("2026-11-12", w, "식비"))
+        self.assertFalse(e["category_fixed"])
+        w["김민수"] = 9
+        self.assertEqual(e["weights"]["김민수"], 2)   # 넘긴 dict 를 나중에 고쳐도 지출은 그대로
+
+    def test_payer_not_in_members(self):
+        e, _ = self.add(payer="김민수", members=["이서연"], amount="1234.5")
+        self.assertEqual((e["payer"], e["members"], e["amount"]), ("김민수", ["이서연"], 1235))
+
+
 if __name__ == "__main__":
     unittest.main()
