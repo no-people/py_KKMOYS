@@ -304,6 +304,18 @@ class ExpenseSharesTest(StoreCase):
         with self.assertRaises(ValueError):
             queries.expense_shares(self._e(amount=-1))
 
+    def test_amount_read_like_period_total(self):
+        # 손으로 고친 자료의 문자열 금액도 period_total·person_paid 와 같은 money.to_won 값으로 나눈다
+        self.assertEqual(queries.expense_shares(self._e(amount="6000")), {"김민수": 2000, "이서연": 2000, "박지훈": 2000})
+        self.assertEqual(queries.expense_shares(self._e(amount="6,000원")), {"김민수": 2000, "이서연": 2000, "박지훈": 2000})
+        # 규약 1 사사오입: "100.5" → 101 원, 남는 2원은 낸 사람(이서연)부터 목록 순서로
+        self.assertEqual(queries.expense_shares(self._e(amount="100.5")), {"김민수": 34, "이서연": 34, "박지훈": 33})
+
+    def test_bad_amount_raises_value_error(self):
+        for bad in ("abc", "Infinity", "-Infinity", "NaN", "sNaN", None, True):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "^금액 형식이 잘못되었습니다"):
+                queries.expense_shares(self._e(amount=bad))
+
     def test_single_member_payer_outside(self):
         # 참여자 1명, 낸 사람은 참여자가 아님 → 그 한 명이 전액
         self.assertEqual(queries.expense_shares(self._e(amount=5, payer="김민수", members=["박지훈"])),
@@ -330,6 +342,20 @@ class MemberSharesTest(StoreCase):
         self._add("2026-11-13", "김민수", 100)
         self.assertEqual(queries.member_shares(self.store, self.S, self.E),
                          {"김민수": 2034, "이서연": 2033, "박지훈": 2033})
+
+    def test_string_amount_same_as_person_paid(self):
+        # 같은 자료로 낸 돈(person_paid)과 부담(member_shares)의 합이 같다 → 정산 잔액 합 0
+        self._add("2026-11-12", "이서연", "6000")
+        self._add("2026-11-13", "김민수", "1,000.5")
+        shares = queries.member_shares(self.store, self.S, self.E)
+        self.assertEqual(sum(shares.values()), sum(queries.person_paid(self.store, self.S, self.E).values()))
+        self.assertEqual(sum(shares.values()), 7001)
+        self.assertEqual(settle.balance_sum(settle.balances(self.store, self.S, self.E)), 0)
+
+    def test_bad_amount_reported_with_id(self):
+        self._add("2026-11-12", "이서연", "Infinity")
+        with self.assertRaisesRegex(ValueError, "1번 지출을 나눌 수 없습니다: 금액 형식"):
+            queries.member_shares(self.store, self.S, self.E)
 
     def test_period_start_end_included(self):
         # 규약 3: 시작일·끝일 포함, 밖은 제외

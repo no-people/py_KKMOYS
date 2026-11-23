@@ -86,7 +86,12 @@ def active_members(store, on):
 def expense_shares(e):
     """지출 하나의 사람별 부담액. 담당: 기능 4"""
     # 규약 2 "money.split 하나로 나눈다". weights 가 없는 옛 지출은 None(균등)
-    return money.split(e["amount"], e["members"], e["payer"], e.get("weights"))
+    # 금액은 period_total·category_totals·person_paid 와 같이 money.to_won 으로 읽는다(손으로 고친 "6000" 도 같은 값)
+    try:
+        amount = money.to_won(e["amount"])
+    except (ArithmeticError, ValueError):   # "Infinity" 는 Decimal 오류, "NaN" 은 int() 의 영어 메시지라 같은 문구로 맞춘다
+        raise ValueError(f"금액 형식이 잘못되었습니다: {e['amount']}") from None
+    return money.split(amount, e["members"], e["payer"], e.get("weights"))
 
 
 def member_shares(store, start, end):
