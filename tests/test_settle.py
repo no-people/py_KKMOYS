@@ -8,7 +8,7 @@ from helpers import StoreCase
 
 from moim import cli
 from moim.commands import settle as settle_cmd
-from moim.common import money, queries
+from moim.common import ledger, money, queries
 from moim.common.store import Store
 from moim.features import settle
 
@@ -182,6 +182,14 @@ class IsLockedTest(StoreCase):
         self.store.data["locks"] = [{"start": "2026-11-15", "end": "2026-11-15"}]
         self.assertTrue(queries.is_locked(self.store, "2026-11-15"))
         self.assertFalse(queries.is_locked(self.store, "2026-11-16"))
+
+    def test_insert_with_broken_lock_raises_value_error(self):
+        # 호출부(ledger.insert, 기능 1·5·6 이 씀)에도 KeyError 대신 ValueError 로 올라가고 자료는 그대로
+        self.store.data["locks"] = [{"start": "2026-11-01"}]
+        with self.assertRaisesRegex(ValueError, "1번째 확정 기간"):
+            ledger.insert(self.store, "2026-12-05", "김민수", 1000, ["김민수", "이서연"])
+        self.assertEqual((self.store.data["expenses"], self.store.data["next_id"]), ([], 1))
+        self.assertEqual(self.store.data["history"], [])
 
     def test_bad_date_raises(self):
         with self.assertRaises(ValueError):
