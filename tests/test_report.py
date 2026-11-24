@@ -382,6 +382,7 @@ class TestTextfmtBarChart(unittest.TestCase):
         with self.assertRaises(ValueError):
             textfmt.bar_chart({}, bar_width=0)
 
+
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):
         return SimpleNamespace(data={"expenses": expenses})
