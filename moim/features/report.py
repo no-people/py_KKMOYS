@@ -179,6 +179,7 @@ def save_report(text, path):
 
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
+
     if (start is None) != (end is None):
         raise ValueError("기간 검색에는 start와 end를 모두 지정해야 합니다.")
 
@@ -214,3 +215,5 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
         matched.append(exp)
     matched.sort(key=lambda e: (dates.fmt(dates.parse(e["date"])), e.get("id", 0)))
     return matched
+
+    raise NotImplementedError("이 함수를 구현한다")

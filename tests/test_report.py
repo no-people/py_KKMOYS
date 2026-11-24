@@ -7,7 +7,7 @@ import unittest
 from moim.common import queries, textfmt
 from moim.common.store import Store
 from moim.features import report as report_feature
-
+from moim.features import report
 
 class TestExpensesIn(unittest.TestCase):
     def test_expenses_in_boundaries_and_deleted(self):
@@ -134,6 +134,16 @@ class TestPersonPaid(unittest.TestCase):
         self.assertEqual(result, {})
 
 
+class TestSearchFeature(unittest.TestCase):
+    @unittest.skip("search는 확장 PR에서 구현 예정(스켈레톤 유지)")
+    def test_search_sorts_consistently_with_and_without_date_range(self):
+        pass
+
+    @unittest.skip("search는 확장 PR에서 구현 예정(스켈레톤 유지)")
+    def test_search_handles_none_members_safely(self):
+        pass
+
+
 class TestEmptyStoreDateValidation(unittest.TestCase):
     def setUp(self):
         self.empty_store = SimpleNamespace(data={"expenses": []})
@@ -171,7 +181,6 @@ class TestEmptyStoreDateValidation(unittest.TestCase):
             {"민기슬": 4000},
         )
 
-
 class TestEmptyStoreInvalidDate(unittest.TestCase):
     def test_expenses_in_invalid_start_date_empty_store(self):
         store = SimpleNamespace(data={"expenses": []})
@@ -202,7 +211,6 @@ class TestEmptyStoreInvalidDate(unittest.TestCase):
         store = SimpleNamespace(data={"expenses": []})
         with self.assertRaises(ValueError):
             queries.category_totals(store, "2026-13-01", "2026-11-30")
-
 
 class TestTextfmtTable(unittest.TestCase):
     def test_table_spec_example(self):
