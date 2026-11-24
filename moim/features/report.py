@@ -212,4 +212,5 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
             if kw not in haystack:
                 continue
         matched.append(exp)
+    matched.sort(key=lambda e: (dates.fmt(dates.parse(e["date"])), e.get("id", 0)))
     return matched
