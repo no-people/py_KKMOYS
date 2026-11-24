@@ -1,14 +1,18 @@
 """기능 2 분류 규칙 테스트. 자료 항목 category_fixed 포함."""
 
+import contextlib
+import io
 import json
 import unittest
 from datetime import date
 
 from helpers import StoreCase
 
+from moim import cli
 from moim.common import queries
 from moim.common.rules import UNCATEGORIZED
 from moim.common.store import Store
+from moim.features import categorize
 
 
 class CategoryFixedFormatTest(StoreCase):
@@ -34,15 +38,6 @@ class CategoryFixedFormatTest(StoreCase):
         self.store.data["expenses"].append(self._expense(1, False))
         self.store.save()
         self.assertIs(Store(self.store.path).load().get_expense(1)["category_fixed"], False)
-
-    def test_old_expense_without_fixed_reads_as_false(self):
-        # category_fixed 가 생기기 전의 옛 자료 파일: 읽는 쪽은 e.get("category_fixed", False) 로 False 를 얻는다
-        with open(self.path("old.json"), "w", encoding="utf-8") as f:
-            json.dump({"members": [], "expenses": [self._expense(1)], "next_id": 2}, f)
-        e = Store(self.path("old.json")).load().get_expense(1)
-        self.assertNotIn("category_fixed", e)
-        self.assertFalse(e.get("category_fixed", False))
-
 
 class CategoryOfTest(unittest.TestCase):
     """queries.category_of — 공통모듈_함수규격.md 3-3, 규약 5."""
@@ -164,3 +159,183 @@ class CategoryTotalsTest(StoreCase):
         result = queries.category_totals(self.store, "2026-11-01", "2026-11-30")
         total = queries.period_total(self.store, "2026-11-01", "2026-11-30")
         self.assertEqual(sum(v["amount"] for v in result.values()), total)
+
+
+def _expense(eid, memo, category=None, amount=9000, payer="김민수", date="2026-11-12", **kw):
+    """테스트용 지출 dict. kw 로 category_fixed·deleted 를 준다(주지 않으면 키가 없는 옛 지출)."""
+    e = {"id": eid, "date": date, "payer": payer, "amount": amount,
+         "members": ["김민수", "이서연"], "category": category, "memo": memo}
+    e.update(kw)
+    return e
+
+
+class RulesFileTest(StoreCase):
+    """load_rules·save_rules — 규칙 파일은 JSON, 잘못된 파일은 ValueError."""
+
+    def test_save_load_round_trip(self):
+        rules = []
+        categorize.add_rule(rules, "식비", ["저녁", "점심"], priority=2)
+        categorize.save_rules(self.cfg["rules"], rules)
+        self.assertEqual(categorize.load_rules(self.cfg["rules"]), rules)
+
+    def test_missing_file_is_empty(self):
+        self.assertEqual(categorize.load_rules(self.path("없음.json")), [])
+
+    def test_broken_file_raises(self):
+        # JSON 이 아님 / 목록이 아님 / 규칙에 분류 이름이 없음
+        for text in ("{깨진", '{"category": "식비"}', '[{"keywords": ["저녁"]}]'):
+            with self.subTest(text=text):
+                with open(self.cfg["rules"], "w", encoding="utf-8") as f:
+                    f.write(text)
+                with self.assertRaises(ValueError):
+                    categorize.load_rules(self.cfg["rules"])
+
+
+class AddRemoveRuleTest(unittest.TestCase):
+    """add_rule·remove_rule."""
+
+    def test_add_strips_names(self):
+        rules = []
+        rule = categorize.add_rule(rules, " 식비 ", [" 저녁 ", ""])
+        self.assertEqual((rule["category"], rule["keywords"]), ("식비", ["저녁"]))
+        self.assertIs(rules[0], rule)
+
+    def test_add_rejects_bad_rule(self):
+        # 분류 이름이 비었거나, 조건이 하나도 없으면 거부
+        for kwargs in ({"category": " ", "keywords": ["저녁"]}, {"category": "식비"}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    categorize.add_rule([], **kwargs)
+
+    def test_remove_out_of_range(self):
+        rules = []
+        categorize.add_rule(rules, "식비", ["저녁"])
+        for index in (1, -1):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                categorize.remove_rule(rules, index)
+        self.assertEqual(len(rules), 1)
+
+
+class ClassifyTest(unittest.TestCase):
+    """matches·classify — 키워드 하나라도, 우선순위 → 같으면 먼저 등록, 없으면 None."""
+
+    def setUp(self):
+        self.rules = []
+        categorize.add_rule(self.rules, "식비", ["저녁", "점심"])
+        categorize.add_rule(self.rules, "장소", ["대관", "저녁"])
+
+    def test_any_keyword(self):
+        self.assertEqual(categorize.classify(_expense(1, "토요일 점심"), self.rules), "식비")
+
+    def test_same_priority_first_registered(self):
+        # "저녁" 은 두 규칙에 다 맞음 → 우선순위 0 으로 같으니 먼저 등록한 식비
+        self.assertEqual(categorize.classify(_expense(1, "저녁 대관"), self.rules), "식비")
+
+    def test_higher_priority_wins(self):
+        categorize.add_rule(self.rules, "교통", ["저녁"], priority=1)
+        self.assertEqual(categorize.classify(_expense(1, "저녁"), self.rules), "교통")
+
+    def test_no_match_is_none(self):
+        for memo in ("현수막", ""):
+            with self.subTest(memo=memo):
+                self.assertIsNone(categorize.classify(_expense(1, memo), self.rules))
+
+
+class ApplyRulesTest(StoreCase):
+    """apply_rules — 고정·삭제·확정 기간은 건너뜀, preview 면 안 바꿈, [(번호, 이전, 새)]."""
+
+    def setUp(self):
+        super().setUp()
+        self.rules = []
+        categorize.add_rule(self.rules, "식비", ["저녁"])
+
+    def test_old_expense_reclassified_fixed_skipped(self):
+        # category_fixed 키가 없는 옛 지출은 False 로 보고 다시 분류, True 인 지출은 그대로
+        self.store.data["expenses"] += [_expense(1, "저녁"), _expense(2, "저녁", "장소", category_fixed=True)]
+        self.assertEqual(categorize.apply_rules(self.store, self.rules), [(1, UNCATEGORIZED, "식비")])
+        self.assertEqual([e["category"] for e in self.store.data["expenses"]], ["식비", "장소"])
+
+    def test_preview_changes_nothing(self):
+        self.store.data["expenses"].append(_expense(1, "저녁"))
+        self.assertEqual(categorize.apply_rules(self.store, self.rules, preview=True), [(1, UNCATEGORIZED, "식비")])
+        self.assertIsNone(self.store.data["expenses"][0]["category"])
+        self.assertEqual(self.store.data["history"], [])
+
+    def test_deleted_and_locked_skipped(self):
+        self.store.data["locks"].append({"start": "2026-10-01", "end": "2026-10-31"})
+        self.store.data["expenses"] += [_expense(1, "저녁", deleted=True), _expense(2, "저녁", date="2026-10-31")]
+        self.assertEqual(categorize.apply_rules(self.store, self.rules), [])
+
+    def test_no_match_keeps_category_and_records_history(self):
+        self.store.data["expenses"] += [_expense(1, "현수막", "장소"), _expense(2, "저녁", " 식비 "), _expense(3, "저녁", "교통")]
+        self.assertEqual(categorize.apply_rules(self.store, self.rules), [(3, "교통", "식비")])
+        self.assertEqual(self.store.data["expenses"][0]["category"], "장소")
+        last = self.store.data["history"][-1]
+        self.assertEqual((last["id"], last["action"], last["before"]["category"], last["after"]["category"]),
+                         (3, "edit", "교통", "식비"))
+
+
+class UncategorizedTest(StoreCase):
+    """uncategorized — category_of 가 "미분류"인 지출, 삭제 표시 제외, 날짜·번호 순."""
+
+    def test_uncategorized_list(self):
+        self.store.data["expenses"] += [
+            _expense(1, "", None, date="2026-11-20"), _expense(2, "", "식비"), _expense(3, "", " "),
+            _expense(4, "", None, deleted=True), _expense(5, "")]
+        self.assertEqual([e["id"] for e in categorize.uncategorized(self.store)], [3, 5, 1])
+
+
+class CatCommandTest(StoreCase):
+    """명령 cat — add·remove·list·apply·uncat. cli.main([...]) 으로 실행한다."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = self.path("config.json")
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump({"data": self.store.path, "rules": self.cfg["rules"]}, f, ensure_ascii=False)
+        self.store.data["expenses"] += [_expense(1, "회의 후 저녁"), _expense(2, "현수막", amount=36000),
+                                        _expense(3, "저녁", "장소", category_fixed=True)]
+        self.store.save()
+
+    def cat(self, *argv):
+        lines = []
+        cli.main(["--config", self.config, "cat", *argv], out=lines.append)
+        return lines
+
+    def saved(self):
+        return Store(self.store.path).load().data["expenses"]
+
+    def test_add_list_remove(self):
+        self.assertEqual(self.cat("add", "식비", "--keywords", "저녁", "점심"),
+                         ["규칙 추가: 0. 식비  키워드: 저녁, 점심  우선순위: 0"])
+        self.cat("add", "장소", "--keywords", "대관", "--priority", "1", "--min", "10,000")
+        self.assertEqual(self.cat("list"), ["0. 식비  키워드: 저녁, 점심  우선순위: 0",
+                                            "1. 장소  키워드: 대관  금액: 10,000원~  우선순위: 1"])
+        self.assertEqual(self.cat("remove", "0"), ["규칙 삭제: 0. 식비"])
+        self.assertEqual([r["category"] for r in categorize.load_rules(self.cfg["rules"])], ["장소"])
+
+    def test_list_empty(self):
+        self.assertEqual(self.cat("list"), ["등록된 규칙이 없습니다"])
+
+    def test_bad_input_error_message(self):
+        # 조건 없는 규칙·없는 번호는 "오류: 이유" 한 줄과 종료 코드 1(#56 통합 실행 오류 안내)
+        for argv, reason in ((("add", "식비"), "키워드·낸 사람·금액 범위 가운데 조건을 하나 이상 주세요"),
+                             (("remove", "0"), "0번 규칙이 없습니다")):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    code = cli.main(["--config", self.config, "cat", *argv], out=print)
+                self.assertEqual((code, err.getvalue()), (1, f"오류: {reason}\n"))
+
+    def test_apply_preview_then_apply(self):
+        self.cat("add", "식비", "--keywords", "저녁")
+        self.assertEqual(self.cat("apply", "--preview"),
+                         ["1번: 미분류 → 식비", "(미리 보기) 1건이 바뀝니다. 자료는 바꾸지 않았습니다"])
+        self.assertIsNone(self.saved()[0]["category"])
+        self.assertEqual(self.cat("apply"), ["1번: 미분류 → 식비", "1건을 다시 분류했습니다"])
+        # 저장됨, 고정된 3번은 그대로
+        self.assertEqual([e["category"] for e in self.saved()], ["식비", None, "장소"])
+
+    def test_uncat(self):
+        self.assertEqual(self.cat("uncat"), ["1번  2026-11-12  9,000원  김민수  회의 후 저녁",
+                                             "2번  2026-11-12  36,000원  김민수  현수막", "미분류 2건"])
