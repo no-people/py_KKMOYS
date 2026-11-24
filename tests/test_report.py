@@ -368,17 +368,16 @@ class TestTextfmtBarChart(unittest.TestCase):
         self.assertEqual(result, "a  -100\nb     0")
 
     def test_bar_chart_invalid_arguments(self):
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, bar_width=0)
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, bar_width=-5)
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, char="")
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, char="##")
-        with self.assertRaises(ValueError):
-            textfmt.bar_chart({"a": 10}, char="가")
+        for bad_width in (0, -5):
+            with self.subTest(bar_width=bad_width):
+                with self.assertRaises(ValueError):
+                    textfmt.bar_chart({"a": 10}, bar_width=bad_width)
+
+        for bad_char in ("", "##", "가"):
+            with self.subTest(char=bad_char):
+                with self.assertRaises(ValueError):
+                    textfmt.bar_chart({"a": 10}, char=bad_char)
 
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()
