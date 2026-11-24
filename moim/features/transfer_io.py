@@ -16,8 +16,7 @@ import json
 import os
 from ..common import dates, ledger, money  # noqa: F401
 from ..common.csvio import detect_encoding, read_csv_rows  # noqa: F401
-from ..common.queries import active_members, expenses_in  # noqa: F401
-from ..common.rules import UNCATEGORIZED
+from ..common.queries import active_members, category_of, expenses_in  # noqa: F401
 
 EXPORT_FIELDS = ("id", "date", "payer", "amount", "category", "members", "weights", "memo")
 
@@ -35,7 +34,7 @@ def _select_expenses(store, start=None, end=None, category=None):
         target = category.strip()
         if not target:
             raise ValueError("분류 이름은 비어 있을 수 없습니다")
-        items = [e for e in items if (e.get("category") or UNCATEGORIZED) == target]
+        items = [e for e in items if category_of(e) == target]
     return items
 
 
@@ -58,7 +57,7 @@ def export_csv(store, path, start=None, end=None, category=None):
                 "date": dates.fmt(e["date"]),
                 "payer": e["payer"],
                 "amount": money.to_won(e["amount"]),
-                "category": e.get("category") or UNCATEGORIZED,
+                "category": category_of(e),
                 "members": ",".join(e.get("members", [])),
                 "weights": _format_weights(e.get("weights")),
                 "memo": e.get("memo", ""),
