@@ -146,4 +146,6 @@ def overlaps(rules):
 
 def summary(store, start, end):
     """분류별 건수·금액(공통 모듈의 분류 조회 사용)."""
-    raise NotImplementedError("이 함수를 구현한다")
+    # 기간(양 끝 포함)·삭제 제외·"미분류"·원 단위 합은 category_totals 가 맡는다(규약 3·5·6-1)
+    # 기능 파일에서 따로 세거나 더하지 않아야 보고서·예산의 분류별 합계와 같다(역할분담 5-3)
+    return category_totals(store, start, end)
