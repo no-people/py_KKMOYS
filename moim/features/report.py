@@ -166,4 +166,46 @@ def save_report(text, path):
 
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
-    raise NotImplementedError("이 함수를 구현한다")
+    start_d = dates.parse(start) if start is not None else None
+    end_d = dates.parse(end) if end is not None else None
+    if start_d is not None and end_d is not None and start_d > end_d:
+        raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
+
+    min_won = money.to_won(min_amount) if min_amount is not None else None
+    max_won = money.to_won(max_amount) if max_amount is not None else None
+    if min_won is not None and max_won is not None and min_won > max_won:
+        raise ValueError("최소 금액이 최대 금액보다 클 수 없습니다.")
+
+    keyword = word.strip() if isinstance(word, str) else word
+
+    results = []
+    for e in store.data.get("expenses", []):
+        if e.get("deleted"):
+            continue
+
+        e_date = dates.parse(e["date"])
+        if start_d is not None and e_date < start_d:
+            continue
+        if end_d is not None and e_date > end_d:
+            continue
+
+        if person is not None:
+            members = e.get("members") or []
+            if e.get("payer") != person and person not in members:
+                continue
+
+        amt = e.get("amount", 0)
+        if min_won is not None and amt < min_won:
+            continue
+        if max_won is not None and amt > max_won:
+            continue
+
+        if keyword:
+            memo = e.get("memo") or ""
+            if keyword not in memo:
+                continue
+
+        results.append(e)
+
+    results.sort(key=lambda e: (e["date"], e.get("id", 0)))
+    return results

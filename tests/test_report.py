@@ -382,6 +382,42 @@ class TestTextfmtBarChart(unittest.TestCase):
         with self.assertRaises(ValueError):
             textfmt.bar_chart({}, bar_width=0)
 
+class TestSearch(unittest.TestCase):
+    def setUp(self):
+        self.store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 15000, "members": ["김민수", "이서연"], "memo": "회의 후 저녁", "deleted": False},
+                    {"id": 1, "date": "2026-11-10", "payer": "이서연", "amount": 5000, "members": ["이서연", "박지훈"], "memo": "회의 커피", "deleted": False},
+                    {"id": 3, "date": "2026-11-01", "payer": "박지훈", "amount": 30000, "members": ["박지훈"], "memo": "장소 대여", "deleted": False},
+                    {"id": 4, "date": "2026-11-30", "payer": "김민수", "amount": 8000, "members": ["김민수", "박지훈"], "memo": "간식", "deleted": False},
+                    {"id": 5, "date": "2026-11-15", "payer": "김민수", "amount": 12000, "members": ["김민수"], "memo": "회의 삭제건", "deleted": True},
+                ]
+            }
+        )
+
+    def test_no_filters_excludes_deleted_and_sorts_by_date_then_id(self):
+        res = report_feature.search(self.store)
+        self.assertEqual([e["id"] for e in res], [3, 1, 2, 4])
+
+    def test_period_boundaries_inclusive(self):
+        res = report_feature.search(self.store, start="2026-11-01", end="2026-11-10")
+        self.assertEqual([e["id"] for e in res], [3, 1, 2])
+
+    def test_person_matches_payer_or_member(self):
+        # 이서연은 1번(payer), 2번(member) 모두에 해당
+        res = report_feature.search(self.store, person="이서연")
+        self.assertEqual([e["id"] for e in res], [1, 2])
+
+    def test_amount_range_and_word_combined(self):
+        res = report_feature.search(self.store, min_amount="5,000원", max_amount=20000, word="회의")
+        self.assertEqual([e["id"] for e in res], [1, 2])
+
+    def test_invalid_ranges_raise_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, start="2026-11-20", end="2026-11-10")
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, min_amount=20000, max_amount=10000)
 
 if __name__ == "__main__":
     unittest.main() 
