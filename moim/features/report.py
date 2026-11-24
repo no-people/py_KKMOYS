@@ -11,6 +11,7 @@
 
 import calendar
 import os
+from decimal import Decimal, ROUND_HALF_UP
 from ..common import dates, money
 from ..common.textfmt import bar_chart, pad, table, width  # noqa: F401  (보고서 기능의 표 출력은 공통 함수로 제공)
 from ..common.queries import category_totals, expenses_in, period_total, person_paid
@@ -106,7 +107,20 @@ def period_summary(store, start, end):
 
 def month_over_month(store, month):
     """전월 대비. 돌려주는 값: (이번 달, 지난달, 증감, 증감률 % 또는 None)"""
-    raise NotImplementedError("이 함수를 구현한다")
+    year, mon = _to_ym_tuple(month)
+    prev_ym = (year - 1, 12) if mon == 1 else (year, mon - 1)
+
+    cur_total = period_total(store, *_month_bounds((year, mon)))
+    prev_total = period_total(store, *_month_bounds(prev_ym))
+    diff = cur_total - prev_total
+
+    if prev_total == 0:
+        rate = None
+    else:
+        raw_rate = (Decimal(diff) * Decimal(100)) / Decimal(prev_total)
+        rate = float(raw_rate.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+    return (cur_total, prev_total, diff, rate)
 
 
 def weekday_totals(store, start, end):

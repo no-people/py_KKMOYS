@@ -382,6 +382,34 @@ class TestTextfmtBarChart(unittest.TestCase):
         with self.assertRaises(ValueError):
             textfmt.bar_chart({}, bar_width=0)
 
+class TestMonthOverMonth(unittest.TestCase):
+    def _make_store(self, expenses):
+        return SimpleNamespace(data={"expenses": expenses})
+
+    def test_increase_and_half_up_rounding(self):
+        # 200 -> 205: +5원, +2.5% (사사오입 확인)
+        store = self._make_store([
+            {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 200, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 205, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store, "2026-11"), (205, 200, 5, 2.5))
+        self.assertEqual(report_feature.month_over_month(store, (2026, 11)), (205, 200, 5, 2.5))
+
+    def test_previous_zero_returns_none_rate(self):
+        # 지난달 지출이 0원이면 증감률은 None
+        store = self._make_store([
+            {"id": 1, "date": "2026-11-05", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store, "2026-11"), (10000, 0, 10000, None))
+
+    def test_year_boundary_and_excludes_deleted(self):
+        # 2027-01의 전월은 2026-12, 삭제된 지출 제외
+        store = self._make_store([
+            {"id": 1, "date": "2026-12-31", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-12-31", "payer": "김민수", "amount": 99999, "members": ["김민수"], "deleted": True},
+            {"id": 3, "date": "2027-01-01", "payer": "김민수", "amount": 8000, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store, "2027-01"), (8000, 10000, -2000, -20.0))
 
 if __name__ == "__main__":
     unittest.main() 
