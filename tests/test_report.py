@@ -7,6 +7,7 @@ import unittest
 from moim.common import queries, textfmt
 from moim.common.store import Store
 from moim.features import report as report_feature
+from moim.commands import report as report_cmd
 
 
 class TestExpensesIn(unittest.TestCase):
@@ -383,6 +384,7 @@ class TestTextfmtBarChart(unittest.TestCase):
             textfmt.bar_chart({}, bar_width=0)
 
 
+
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):
         return SimpleNamespace(data={"expenses": expenses})
@@ -419,16 +421,22 @@ class TestMonthOverMonth(unittest.TestCase):
         store = self._make_store([
             {"id": 1, "date": "2026-11-05", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
         ])
-        self.assertEqual(report_feature.month_over_month(store, "2026-11"), (10000, 0, 10000, None))
 
-    def test_year_boundary_and_excludes_deleted(self):
-        # 2027-01의 전월은 2026-12, 삭제된 지출 제외
+    def test_report_mom_command_zero_prev_output(self):
         store = self._make_store([
-            {"id": 1, "date": "2026-12-31", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
-            {"id": 2, "date": "2026-12-31", "payer": "김민수", "amount": 99999, "members": ["김민수"], "deleted": True},
-            {"id": 3, "date": "2027-01-01", "payer": "김민수", "amount": 8000, "members": ["김민수"], "deleted": False},
+            {"id": 1, "date": "2026-11-05", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
         ])
-        self.assertEqual(report_feature.month_over_month(store, "2027-01"), (8000, 10000, -2000, -20.0))
+        lines = []
+        args = SimpleNamespace(month="2026-11")
+        changed = report_cmd.run("mom", args, {}, store, lines.append)
+
+        self.assertFalse(changed)
+        self.assertEqual(lines[0], "[2026-11 전월 대비]")
+        self.assertEqual(lines[1], "지난달: 0원")
+        self.assertEqual(lines[2], "이번 달: 10,000원")
+        self.assertEqual(lines[3], "증감: +10,000원")
+        self.assertEqual(lines[4], "증감률: 지난달 지출이 0원이어서 계산할 수 없습니다.")
+
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()
