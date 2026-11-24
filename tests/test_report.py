@@ -7,7 +7,6 @@ import unittest
 from moim.common import queries, textfmt
 from moim.common.store import Store
 from moim.features import report as report_feature
-from moim.features import report
 
 
 class TestExpensesIn(unittest.TestCase):
@@ -133,16 +132,6 @@ class TestPersonPaid(unittest.TestCase):
     def test_person_paid_empty_when_no_matching_expenses(self):
         result = queries.person_paid(self.store, "2026-01-01", "2026-01-31")
         self.assertEqual(result, {})
-
-
-class TestSearchFeature(unittest.TestCase):
-    @unittest.skip("search는 확장 PR에서 구현 예정(스켈레톤 유지)")
-    def test_search_sorts_consistently_with_and_without_date_range(self):
-        pass
-
-    @unittest.skip("search는 확장 PR에서 구현 예정(스켈레톤 유지)")
-    def test_search_handles_none_members_safely(self):
-        pass
 
 
 class TestEmptyStoreDateValidation(unittest.TestCase):
