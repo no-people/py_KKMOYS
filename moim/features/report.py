@@ -208,7 +208,7 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
         if max_won is not None and amt > max_won:
             continue
         if kw:
-            haystack = f"{exp.get('memo', '')} {exp.get('category') or ''}".lower()
+            haystack = str(exp.get("memo") or "").lower()
             if kw not in haystack:
                 continue
         matched.append(exp)
