@@ -8,7 +8,7 @@ from helpers import StoreCase
 
 from moim import cli
 from moim.commands import settle as settle_cmd
-from moim.common import money, queries
+from moim.common import ledger, money, queries
 from moim.common.store import Store
 from moim.features import settle
 
@@ -158,6 +158,39 @@ class IsLockedTest(StoreCase):
             with self.assertRaisesRegex(ValueError, "locks 형식"):
                 queries.is_locked(self.store, "2026-11-15")
 
+    def test_broken_lock_item_raises(self):
+        # 항목 하나가 깨져도 KeyError·TypeError 가 아니라 몇 번째인지 담은 ValueError
+        for bad in ({"start": "2026-12-01"}, {"end": "2026-12-31"}, None, "2026-12-01", [],
+                    {"start": "2026-12-01", "end": None}, {"start": "2026-12-01", "end": "2026-12-32"}):
+            self.store.data["locks"] = [{"start": "2026-10-01", "end": "2026-10-31"}, bad]
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "2번째 확정 기간"):
+                queries.is_locked(self.store, "2026-12-15")
+
+    def test_broken_item_found_even_if_earlier_lock_matches(self):
+        # 앞 기간에 드는 날짜여도 뒤의 깨진 항목을 넘기지 않는다(날짜에 따라 결과가 달라지지 않게)
+        self.store.data["locks"] = [{"start": "2026-11-01", "end": "2026-11-30"}, {"start": "2026-12-01"}]
+        with self.assertRaisesRegex(ValueError, "2번째 확정 기간"):
+            queries.is_locked(self.store, "2026-11-15")
+
+    def test_reversed_lock_raises(self):
+        self.store.data["locks"] = [{"start": "2026-11-30", "end": "2026-11-01"}]
+        with self.assertRaisesRegex(ValueError, "1번째 확정 기간.*시작일이 끝일보다 늦음"):
+            queries.is_locked(self.store, "2026-11-15")
+
+    def test_single_day_lock(self):
+        # 시작일과 끝일이 같은 하루짜리 확정 기간
+        self.store.data["locks"] = [{"start": "2026-11-15", "end": "2026-11-15"}]
+        self.assertTrue(queries.is_locked(self.store, "2026-11-15"))
+        self.assertFalse(queries.is_locked(self.store, "2026-11-16"))
+
+    def test_insert_with_broken_lock_raises_value_error(self):
+        # 호출부(ledger.insert, 기능 1·5·6 이 씀)에도 KeyError 대신 ValueError 로 올라가고 자료는 그대로
+        self.store.data["locks"] = [{"start": "2026-11-01"}]
+        with self.assertRaisesRegex(ValueError, "1번째 확정 기간"):
+            ledger.insert(self.store, "2026-12-05", "김민수", 1000, ["김민수", "이서연"])
+        self.assertEqual((self.store.data["expenses"], self.store.data["next_id"]), ([], 1))
+        self.assertEqual(self.store.data["history"], [])
+
     def test_bad_date_raises(self):
         with self.assertRaises(ValueError):
             queries.is_locked(self.store, "2026-11-31")
@@ -304,6 +337,27 @@ class ExpenseSharesTest(StoreCase):
         with self.assertRaises(ValueError):
             queries.expense_shares(self._e(amount=-1))
 
+    def test_amount_read_like_period_total(self):
+        # 손으로 고친 자료의 문자열 금액도 period_total·person_paid 와 같은 money.to_won 값으로 나눈다
+        self.assertEqual(queries.expense_shares(self._e(amount="6000")), {"김민수": 2000, "이서연": 2000, "박지훈": 2000})
+        self.assertEqual(queries.expense_shares(self._e(amount="6,000원")), {"김민수": 2000, "이서연": 2000, "박지훈": 2000})
+        # 규약 1 사사오입: "100.5" → 101 원, 남는 2원은 낸 사람(이서연)부터 목록 순서로
+        self.assertEqual(queries.expense_shares(self._e(amount="100.5")), {"김민수": 34, "이서연": 34, "박지훈": 33})
+
+    def test_string_zero_amount_same_as_int_zero(self):
+        self.assertEqual(queries.expense_shares(self._e(amount="0")), queries.expense_shares(self._e(amount=0)))
+
+    def test_string_negative_amount_rejected(self):
+        # 문자열로 바꿔도 음수는 split 이 거부한다(int -1 과 같은 동작)
+        for bad in ("-6000", "-0.5"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "음수"):
+                queries.expense_shares(self._e(amount=bad))
+
+    def test_bad_amount_raises_value_error(self):
+        for bad in ("abc", "Infinity", "-Infinity", "NaN", "sNaN", None, True):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "^금액 형식이 잘못되었습니다"):
+                queries.expense_shares(self._e(amount=bad))
+
     def test_single_member_payer_outside(self):
         # 참여자 1명, 낸 사람은 참여자가 아님 → 그 한 명이 전액
         self.assertEqual(queries.expense_shares(self._e(amount=5, payer="김민수", members=["박지훈"])),
@@ -330,6 +384,20 @@ class MemberSharesTest(StoreCase):
         self._add("2026-11-13", "김민수", 100)
         self.assertEqual(queries.member_shares(self.store, self.S, self.E),
                          {"김민수": 2034, "이서연": 2033, "박지훈": 2033})
+
+    def test_string_amount_same_as_person_paid(self):
+        # 같은 자료로 낸 돈(person_paid)과 부담(member_shares)의 합이 같다 → 정산 잔액 합 0
+        self._add("2026-11-12", "이서연", "6000")
+        self._add("2026-11-13", "김민수", "1,000.5")
+        shares = queries.member_shares(self.store, self.S, self.E)
+        self.assertEqual(sum(shares.values()), sum(queries.person_paid(self.store, self.S, self.E).values()))
+        self.assertEqual(sum(shares.values()), 7001)
+        self.assertEqual(settle.balance_sum(settle.balances(self.store, self.S, self.E)), 0)
+
+    def test_bad_amount_reported_with_id(self):
+        self._add("2026-11-12", "이서연", "Infinity")
+        with self.assertRaisesRegex(ValueError, "1번 지출을 나눌 수 없습니다: 금액 형식"):
+            queries.member_shares(self.store, self.S, self.E)
 
     def test_period_start_end_included(self):
         # 규약 3: 시작일·끝일 포함, 밖은 제외
@@ -612,14 +680,17 @@ class SettleBalanceCommandTest(StoreCase):
         self.assertEqual(lines[3].split()[:3], [self.LEE, "0", "3,000"])
         self.assertNotIn("999,999", "\n".join(lines))
 
-    def test_table_shape_spec_6_1(self):
-        # 규격 6-1 예와 같은 모양: 머리줄은 왼쪽 정렬, 열마다 - 줄, 숫자 열은 오른쪽 정렬, 한글 2칸
-        self.assertEqual(settle_cmd._table(["이름", "낸 돈"], [["김민수", 9000], ["이서연", 6000]], numeric={1}),
-                         "이름    낸 돈\n------  -----\n김민수  9,000\n이서연  6,000")
-
-    def test_table_negative_and_wide(self):
-        self.assertEqual(settle_cmd._table(["이름", "잔액"], [["김민수", 1234567], ["Al", -5]], numeric={1}),
-                         "이름    잔액\n------  ---------\n김민수  1,234,567\nAl             -5")
+    def test_balance_lines_exact(self):
+        # 명령 출력 전체: textfmt.table(규격 6-1) 모양 — 머리줄 왼쪽 정렬, 열마다 - 줄, 숫자 열 오른쪽 정렬, 한글 2칸
+        rows = {self.KIM: {"paid": 1234567, "owed": 3000, "sent": 0, "received": 0, "balance": 1231567},
+                "Al": {"paid": 0, "owed": 1231567, "sent": 0, "received": 0, "balance": -1231567}}
+        self.assertEqual(settle_cmd.balance_lines(rows), [
+            "이름    낸 돈      부담       보낸 송금  받은 송금  잔액",
+            "------  ---------  ---------  ---------  ---------  ----------",
+            "김민수  1,234,567      3,000          0          0   1,231,567",
+            "Al              0  1,231,567          0          0  -1,231,567",
+            "잔액 합계: 0",
+        ])
 
     def test_empty_period(self):
         _, lines = self.call("balance", "--month", "2026-11")
