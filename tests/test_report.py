@@ -318,6 +318,54 @@ class TestReportFeature(unittest.TestCase):
         with open(out_file, "r", encoding="utf-8") as f:
             self.assertEqual(f.read(), text)
 
+    def test_invalid_year_month_raises_value_error(self):
+        for bad_ym in [(2026, 0), (2026, 13), ("bad",), True]:
+            with self.subTest(bad_ym=bad_ym):
+                with self.assertRaises(ValueError):
+                    report_feature._to_ym_tuple(bad_ym)
+
+    def test_weekday_week_top_and_biggest_day(self):
+        wk = report_feature.weekday_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(wk[0], 8000)
+        self.assertEqual(wk[3], 6000)
+        self.assertEqual(wk[4], 9000)
+        self.assertEqual(wk[6], 5000)
+
+        labels = report_feature.weekday_labels(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(labels["월"], 8000)
+        self.assertEqual(labels["목"], 6000)
+        self.assertEqual(labels["금"], 9000)
+        self.assertEqual(labels["일"], 5000)
+
+        weeks = report_feature.week_totals(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(weeks["2026-10-26"], 5000)
+        self.assertEqual(weeks["2026-11-09"], 15000)
+        self.assertEqual(weeks["2026-11-30"], 8000)
+
+        top2 = report_feature.top_expenses(self.store, "2026-11-01", "2026-11-30", limit=2)
+        self.assertEqual([e["id"] for e in top2], [3, 4])
+
+        self.assertEqual(report_feature.biggest_day(self.store, "2026-11-01", "2026-11-30"), ("2026-11-13", 9000))
+        self.assertIsNone(report_feature.biggest_day(self.store, "2026-01-01", "2026-01-31"))
+
+    def test_search_filters_ordering_and_excludes_deleted(self):
+        all_matched = report_feature.search(self.store)
+        self.assertEqual([e["id"] for e in all_matched], [6, 1, 2, 3, 4, 7])
+
+        by_person = report_feature.search(self.store, start="2026-11-01", end="2026-11-30", person="오재원")
+        self.assertEqual([e["id"] for e in by_person], [4])
+
+        by_amount_and_word = report_feature.search(
+            self.store,
+            min_amount=6000,
+            max_amount=9000,
+            word="지하철",
+        )
+        self.assertEqual([e["id"] for e in by_amount_and_word], [3])
+
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, start="2026-11-01")
+
 
 class TestTextfmtBarChart(unittest.TestCase):
     def test_bar_chart_spec_example(self):
