@@ -9,6 +9,7 @@
 필요하면 함수를 더 만들어도 된다. 다른 기능 파일은 불러 쓰지 않는다.
 """
 
+import calendar
 import os
 from ..common import dates, money
 from ..common.textfmt import bar_chart, pad, table, width  # noqa: F401  (보고서 기능의 표 출력은 공통 함수로 제공)
@@ -17,13 +18,90 @@ from ..common.queries import category_totals, expenses_in, period_total, person_
 WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
 
+def _to_ym_tuple(ym):
+    if isinstance(ym, bool):
+        raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
+    if isinstance(ym, tuple) and len(ym) == 2:
+        year, month = ym
+        if isinstance(year, bool) or isinstance(month, bool):
+            raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
+        if not (isinstance(year, int) and isinstance(month, int)):
+            raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
+        if not (1 <= month <= 12):
+            raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
+        return (year, month)
+    if isinstance(ym, str):
+        parts = ym.strip().split("-")
+        if len(parts) != 2 or len(parts[0]) != 4 or len(parts[1]) != 2:
+            raise ValueError(f"유효하지 않은 연월 문자열입니다: {ym!r}")
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+        except ValueError as exc:
+            raise ValueError(f"유효하지 않은 연월 문자열입니다: {ym!r}") from exc
+        if not (1 <= month <= 12):
+            raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
+        return (year, month)
+    raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
+
+
+def _format_ym(ym_tuple):
+    year, month = ym_tuple
+    return f"{year:04d}-{month:02d}"
+
+
+def _month_bounds(ym_tuple):
+    year, month = ym_tuple
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last_day:02d}"
+
+
+def _iter_months(start_ym, end_ym):
+    cur_y, cur_m = start_ym
+    end_y, end_m = end_ym
+    if (cur_y, cur_m) > (end_y, end_m):
+        raise ValueError("start_month는 end_month보다 클 수 없습니다.")
+    while (cur_y, cur_m) <= (end_y, end_m):
+        yield (cur_y, cur_m)
+        if cur_m == 12:
+            cur_y += 1
+            cur_m = 1
+        else:
+            cur_m += 1
+
+
+def _category_amount_map(store, start, end):
+    raw = category_totals(store, start, end) or {}
+    totals = {}
+    for cat, val in raw.items():
+        if isinstance(val, dict):
+            totals[cat] = money.to_won(val.get("amount", 0))
+        else:
+            totals[cat] = money.to_won(val)
+    return totals
+
+
 def monthly_totals(store, start_month, end_month):
     """{'YYYY-MM': 합계}"""
-    raise NotImplementedError("이 함수를 구현한다")
+    start_ym = _to_ym_tuple(start_month)
+    end_ym = _to_ym_tuple(end_month)
+    result = {}
+    for ym in _iter_months(start_ym, end_ym):
+        start_d, end_d = _month_bounds(ym)
+        result[_format_ym(ym)] = period_total(store, start_d, end_d)
+    return result
 
 
 def period_summary(store, start, end):
-    raise NotImplementedError("이 함수를 구현한다")
+    expenses_in(store, start, end)
+    total = period_total(store, start, end)
+    by_category = _category_amount_map(store, start, end)
+    by_person = person_paid(store, start, end)
+    return {
+        "total": total,
+        "by_category": by_category,
+        "by_person": by_person,
+    }
 
 
 def month_over_month(store, month):
@@ -49,7 +127,36 @@ def biggest_day(store, start, end):
 
 
 def month_report(store, month):
-    raise NotImplementedError("이 함수를 구현한다")
+    ym = _to_ym_tuple(month)
+    start_d, end_d = _month_bounds(ym)
+    ym_label = _format_ym(ym)
+    total = period_total(store, start_d, end_d)
+    by_category = _category_amount_map(store, start_d, end_d)
+    by_person = person_paid(store, start_d, end_d)
+
+    lines = [
+        f"[{ym_label} 월간 보고서]",
+        f"총 지출: {money.fmt(total)}",
+    ]
+
+    if by_category:
+        cat_rows = [[k, money.fmt(v)] for k, v in by_category.items()]
+        lines.append("[분류별 지출]")
+        lines.append(table(["분류", "금액"], cat_rows))
+        lines.append(bar_chart(by_category))
+    else:
+        lines.append("[분류별 지출]")
+        lines.append("내역 없음")
+
+    if by_person:
+        person_rows = [[k, money.fmt(v)] for k, v in by_person.items()]
+        lines.append("[인원별 지출]")
+        lines.append(table(["인원", "금액"], person_rows))
+    else:
+        lines.append("[인원별 지출]")
+        lines.append("내역 없음")
+
+    return "\n".join(lines) + "\n"
 
 
 def save_report(text, path):

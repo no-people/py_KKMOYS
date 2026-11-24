@@ -6,6 +6,7 @@ import unittest
 
 from moim.common import queries, textfmt
 from moim.common.store import Store
+from moim.features import report as report_feature
 
 
 class TestExpensesIn(unittest.TestCase):
@@ -171,7 +172,6 @@ class TestEmptyStoreDateValidation(unittest.TestCase):
         )
 
 
-
 class TestEmptyStoreInvalidDate(unittest.TestCase):
     def test_expenses_in_invalid_start_date_empty_store(self):
         store = SimpleNamespace(data={"expenses": []})
@@ -271,6 +271,56 @@ class TestTextfmtTable(unittest.TestCase):
             self.assertEqual(line, line.rstrip())
 
 
+class TestReportFeature(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir_obj = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmpdir_obj.name, "data.json"))
+        self.store.data["expenses"] = [
+            {"id": 1, "date": "2026-11-01", "payer": "민기슬", "amount": 5000, "members": ["민기슬", "강동휘"], "category": "식비", "memo": "커피", "deleted": False},
+            {"id": 2, "date": "2026-11-12", "payer": "이서연", "amount": 6000, "members": ["이서연", "김민수"], "category": "식비", "memo": "점심", "deleted": False},
+            {"id": 3, "date": "2026-11-13", "payer": "김민수", "amount": 9000, "members": ["김민수", "이서연"], "category": "교통", "memo": "지하철", "deleted": False},
+            {"id": 4, "date": "2026-11-30", "payer": "민기슬", "amount": 8000, "members": ["민기슬", "오재원"], "category": None, "memo": "간식", "deleted": False},
+            {"id": 5, "date": "2026-11-15", "payer": "강동휘", "amount": 50000, "members": ["강동휘"], "category": "식비", "memo": "삭제됨", "deleted": True},
+            {"id": 6, "date": "2026-10-20", "payer": "김민수", "amount": 10000, "members": ["김민수", "이서연"], "category": "식비", "memo": "10월", "deleted": False},
+            {"id": 7, "date": "2026-12-01", "payer": "민기슬", "amount": 7000, "members": ["민기슬"], "category": "교통", "memo": "12월", "deleted": False},
+        ]
+
+    def tearDown(self):
+        self.tmpdir_obj.cleanup()
+
+    def test_period_summary_boundaries_and_excludes_deleted(self):
+        summary = report_feature.period_summary(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(summary["total"], 28000)
+        self.assertEqual(summary["by_category"], {"식비": 11000, "교통": 9000, "미분류": 8000})
+        self.assertEqual(summary["by_person"], {"민기슬": 13000, "이서연": 6000, "김민수": 9000})
+
+        empty = report_feature.period_summary(self.store, "2026-01-01", "2026-01-31")
+        self.assertEqual(empty, {"total": 0, "by_category": {}, "by_person": {}})
+
+    def test_monthly_totals_and_month_report(self):
+        totals = report_feature.monthly_totals(self.store, start_month=(2026, 10), end_month=(2026, 12))
+        self.assertEqual(totals, {"2026-10": 10000, "2026-11": 28000, "2026-12": 7000})
+
+        str_month_totals = report_feature.monthly_totals(self.store, start_month="2026-11", end_month="2026-11")
+        self.assertEqual(str_month_totals, {"2026-11": 28000})
+
+        text = report_feature.month_report(self.store, month=(2026, 11))
+        self.assertIn("2026-11", text)
+        self.assertIn("28,000", text)
+        self.assertIn("식비", text)
+        self.assertIn("민기슬", text)
+
+        str_text = report_feature.month_report(self.store, month="2026-11")
+        self.assertIn("2026-11", str_text)
+        self.assertIn("28,000", str_text)
+
+    def test_invalid_year_month_raises_value_error(self):
+        for bad_ym in [(2026, 0), (2026, 13), ("bad",), True]:
+            with self.subTest(bad_ym=bad_ym):
+                with self.assertRaises(ValueError):
+                    report_feature._to_ym_tuple(bad_ym)
+
+
 class TestTextfmtBarChart(unittest.TestCase):
     def test_bar_chart_spec_example(self):
         data = {"식비": 10000, "교통": 9000, "미분류": 2000}
@@ -331,4 +381,4 @@ class TestTextfmtBarChart(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main() 
