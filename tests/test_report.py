@@ -362,7 +362,20 @@ class TestReportFeature(unittest.TestCase):
             word="지하철",
         )
         self.assertEqual([e["id"] for e in by_amount_and_word], [3])
-
+        self.store.data["expenses"].append(
+            {
+                "id": 8,
+                "date": "2026-11-12",
+                "payer": "민기슬",
+                "amount": 4000,
+                "members": ["민기슬"],
+                "category": "식비",
+                "memo": "간식추가",
+                "deleted": False,
+            }
+        )
+        ranged = report_feature.search(self.store, start="2026-11-01", end="2026-11-30")
+        self.assertEqual([e["id"] for e in ranged], [1, 2, 8, 3, 4])
         with self.assertRaises(ValueError):
             report_feature.search(self.store, start="2026-11-01")
 
