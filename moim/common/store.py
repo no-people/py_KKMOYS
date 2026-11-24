@@ -74,33 +74,29 @@ class Store:
         tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=target_dir)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(self.data, f, ensure_ascii=False, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-            except BaseException:
-                tmp_path = tmp_path if tmp_path and os.path.exists(tmp_path) else None
-                raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
 
             if os.path.exists(self.path):
-                os.makedirs(self.backup_dir, exist_ok=True)
-                stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-                backup_name = f"data-{stamp}.json"
-                backup_path = os.path.join(self.backup_dir, backup_name)
-                with open(self.path, "rb") as src, open(backup_path, "wb") as dst:
-                    dst.write(src.read())
-                    dst.flush()
-                    os.fsync(dst.fileno())
+                if self.keep > 0:
+                    os.makedirs(self.backup_dir, exist_ok=True)
+                    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                    backup_name = f"data-{stamp}.json"
+                    backup_path = os.path.join(self.backup_dir, backup_name)
+                    with open(self.path, "rb") as src, open(backup_path, "wb") as dst:
+                        dst.write(src.read())
+                        dst.flush()
+                        os.fsync(dst.fileno())
 
-                if self.keep == 0:
-                    for old_path in self.backups():
-                        os.remove(old_path)
-                else:
                     existing = self.backups()
                     if len(existing) > self.keep:
                         for old_path in existing[:-self.keep]:
                             os.remove(old_path)
+                else:
+                    for old_path in self.backups():
+                        os.remove(old_path)
 
             os.replace(tmp_path, self.path)
             tmp_path = None
