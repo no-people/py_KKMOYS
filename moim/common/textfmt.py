@@ -57,7 +57,7 @@ def table(headers, rows, total=None, numeric=None):
 
 def bar_chart(data, bar_width=30, char="#"):
     """{이름: 값} 을 글자 막대그래프로."""
-    if type(bar_width) is not int or bar_width < 1:
+    if not (isinstance(bar_width, int) and not isinstance(bar_width, bool)) or bar_width < 1:
         raise ValueError("bar_width는 1 이상의 정수여야 합니다.")
     if not isinstance(char, str) or width(char) != 1:
         raise ValueError("char는 화면 폭 1칸짜리 문자여야 합니다.")
