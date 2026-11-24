@@ -118,7 +118,7 @@ def month_over_month(store, month):
         rate = None
     else:
         raw_rate = (Decimal(diff) * Decimal(100)) / Decimal(prev_total)
-        rate = float(raw_rate.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+        rate = float(raw_rate.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) or 0.0
 
     return (cur_total, prev_total, diff, rate)
 

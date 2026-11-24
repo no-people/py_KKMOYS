@@ -1,3 +1,11 @@
+"""명령 묶음 `report`(월별·기간 보고서). 담당: 기능 3.
+
+add_parser 에서 하위 명령과 인자를 만들고, run 에서 하위 명령을 실행한다.
+run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때만 저장한다).
+인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
+"""
+
+
 from ..common import money
 from ..features import report as report_feat
 

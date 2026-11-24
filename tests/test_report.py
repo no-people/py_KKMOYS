@@ -387,13 +387,31 @@ class TestMonthOverMonth(unittest.TestCase):
         return SimpleNamespace(data={"expenses": expenses})
 
     def test_increase_and_half_up_rounding(self):
-        # 200 -> 205: +5원, +2.5% (사사오입 확인)
+        # 200 -> 205: +5원, +2.5%
         store = self._make_store([
             {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 200, "members": ["김민수"], "deleted": False},
             {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 205, "members": ["김민수"], "deleted": False},
         ])
         self.assertEqual(report_feature.month_over_month(store, "2026-11"), (205, 200, 5, 2.5))
         self.assertEqual(report_feature.month_over_month(store, (2026, 11)), (205, 200, 5, 2.5))
+
+        # 2000 -> 2041: +41원, 2.05% -> ROUND_HALF_UP으로 2.1%
+        store_half_up = self._make_store([
+            {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 2000, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 2041, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store_half_up, "2026-11"), (2041, 2000, 41, 2.1))
+
+    def test_tiny_decrease_normalizes_negative_zero(self):
+        # 100000 -> 99999: -1원, -0.001% -> -0.0이 아닌 0.0으로 통일
+        store = self._make_store([
+            {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 100000, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 99999, "members": ["김민수"], "deleted": False},
+        ])
+        cur, prev, diff, rate = report_feature.month_over_month(store, "2026-11")
+        self.assertEqual((cur, prev, diff), (99999, 100000, -1))
+        self.assertEqual(rate, 0.0)
+        self.assertEqual(f"{rate:.1f}%", "0.0%")
 
     def test_previous_zero_returns_none_rate(self):
         # 지난달 지출이 0원이면 증감률은 None
