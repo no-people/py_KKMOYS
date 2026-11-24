@@ -4,6 +4,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
+from moim.commands import report as report_cmd
 from moim.common import queries, textfmt
 from moim.common.store import Store
 from moim.features import report as report_feature
@@ -383,5 +384,68 @@ class TestTextfmtBarChart(unittest.TestCase):
             textfmt.bar_chart({}, bar_width=0)
 
 
+class TestMonthOverMonth(unittest.TestCase):
+    def _make_store(self, expenses):
+        return SimpleNamespace(data={"expenses": expenses})
+
+    def test_increase_and_half_up_rounding(self):
+        # 200 -> 205: +5원, +2.5%
+        store = self._make_store([
+            {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 200, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 205, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store, "2026-11"), (205, 200, 5, 2.5))
+        self.assertEqual(report_feature.month_over_month(store, (2026, 11)), (205, 200, 5, 2.5))
+
+        # 2000 -> 2041: +41원, 2.05% -> ROUND_HALF_UP으로 2.1%
+        store_half_up = self._make_store([
+            {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 2000, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 2041, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store_half_up, "2026-11"), (2041, 2000, 41, 2.1))
+
+    def test_tiny_decrease_normalizes_negative_zero(self):
+        # 100000 -> 99999: -1원, -0.001% -> -0.0이 아닌 0.0으로 통일
+        store = self._make_store([
+            {"id": 1, "date": "2026-10-15", "payer": "김민수", "amount": 100000, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 99999, "members": ["김민수"], "deleted": False},
+        ])
+        cur, prev, diff, rate = report_feature.month_over_month(store, "2026-11")
+        self.assertEqual((cur, prev, diff), (99999, 100000, -1))
+        self.assertEqual(rate, 0.0)
+        self.assertEqual(f"{rate:.1f}%", "0.0%")
+
+    def test_previous_zero_returns_none_rate(self):
+        # 지난달 지출이 0원이면 증감률은 None
+        store = self._make_store([
+            {"id": 1, "date": "2026-11-05", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store, "2026-11"), (10000, 0, 10000, None))
+
+    def test_year_boundary_and_excludes_deleted(self):
+        # 2027-01의 전월은 2026-12, 삭제된 지출 제외
+        store = self._make_store([
+            {"id": 1, "date": "2026-12-31", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
+            {"id": 2, "date": "2026-12-31", "payer": "김민수", "amount": 99999, "members": ["김민수"], "deleted": True},
+            {"id": 3, "date": "2027-01-01", "payer": "김민수", "amount": 8000, "members": ["김민수"], "deleted": False},
+        ])
+        self.assertEqual(report_feature.month_over_month(store, "2027-01"), (8000, 10000, -2000, -20.0))
+
+    def test_report_mom_command_zero_prev_output(self):
+        store = self._make_store([
+            {"id": 1, "date": "2026-11-05", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
+        ])
+        lines = []
+        args = SimpleNamespace(month="2026-11")
+        changed = report_cmd.run("mom", args, {}, store, lines.append)
+
+        self.assertFalse(changed)
+        self.assertEqual(lines[0], "[2026-11 전월 대비]")
+        self.assertEqual(lines[1], "지난달: 0원")
+        self.assertEqual(lines[2], "이번 달: 10,000원")
+        self.assertEqual(lines[3], "증감: +10,000원")
+        self.assertEqual(lines[4], "증감률: 지난달 지출이 0원이어서 계산할 수 없습니다.")
+
+
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()
