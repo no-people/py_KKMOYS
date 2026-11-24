@@ -135,13 +135,60 @@ class TestPersonPaid(unittest.TestCase):
 
 
 class TestSearchFeature(unittest.TestCase):
-    @unittest.skip("search는 확장 PR에서 구현 예정(스켈레톤 유지)")
-    def test_search_sorts_consistently_with_and_without_date_range(self):
-        pass
+    def setUp(self):
+        self.store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {
+                        "id": 2,
+                        "date": "2026-11-15",
+                        "payer": "김민수",
+                        "amount": 15000,
+                        "members": None,
+                        "memo": "점심 회식",
+                        "deleted": False,
+                    },
+                    {
+                        "id": 1,
+                        "date": "2026-11-10",
+                        "payer": "이서연",
+                        "amount": 10000,
+                        "members": ["김민수", "이서연"],
+                        "memo": "커피",
+                        "deleted": False,
+                    },
+                    {
+                        "id": 3,
+                        "date": "2026-11-05",
+                        "payer": "김민수",
+                        "amount": 20000,
+                        "members": ["김민수"],
+                        "memo": "저녁 모임",
+                        "deleted": False,
+                    },
+                    {
+                        "id": 4,
+                        "date": "2026-11-01",
+                        "payer": "김민수",
+                        "amount": 99000,
+                        "members": ["김민수"],
+                        "memo": "삭제된 지출",
+                        "deleted": True,
+                    },
+                ]
+            }
+        )
 
-    @unittest.skip("search는 확장 PR에서 구현 예정(스켈레톤 유지)")
+    def test_search_sorts_consistently_with_and_without_date_range(self):
+        with_range = report.search(self.store, start="2026-11-01", end="2026-11-30")
+        without_range = report.search(self.store)
+
+        self.assertEqual([e["id"] for e in with_range], [3, 1, 2])
+        self.assertEqual([e["id"] for e in without_range], [3, 1, 2])
+
     def test_search_handles_none_members_safely(self):
-        pass
+        result = report.search(self.store, person="김민수")
+        self.assertEqual([e["id"] for e in result], [3, 1, 2])
 
 
 class TestEmptyStoreDateValidation(unittest.TestCase):
