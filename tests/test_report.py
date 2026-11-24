@@ -421,6 +421,7 @@ class TestMonthOverMonth(unittest.TestCase):
         store = self._make_store([
             {"id": 1, "date": "2026-11-05", "payer": "김민수", "amount": 10000, "members": ["김민수"], "deleted": False},
         ])
+        self.assertEqual(report_feature.month_over_month(store, "2026-11"), (10000, 0, 10000, None))
 
     def test_report_mom_command_zero_prev_output(self):
         store = self._make_store([
