@@ -5,7 +5,6 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-
 from ..common import money
 from ..features import report as report_feat
 
