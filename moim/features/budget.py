@@ -13,6 +13,7 @@
 필요하면 함수를 더 만들어도 된다. 다른 기능 파일은 불러 쓰지 않는다.
 """
 
+import datetime as dt
 from decimal import Decimal, InvalidOperation
 
 from ..common import dates, ledger, money
@@ -105,7 +106,13 @@ def category_status(store, cfg, month):
 
 def forecast(store, month, today):
     """지금 속도로 쓰면 월말 합계가 얼마가 되는지. (오늘까지 지출 / 지난 일수) x 그달 일수."""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    day = dates.parse(today)
+    if not start <= day <= end:
+        raise ValueError("예측 기준일은 선택한 달 안의 날짜여야 합니다")
+    spent = period_total(store, start, day)
+    estimate = Decimal(spent) * end.day / day.day
+    return money.to_won(estimate)
 
 
 def record_payment(store, date, member, amount, memo=""):
@@ -181,4 +188,55 @@ def import_bank(store, path, treasurer):
     이미 들어간 거래(같은 날·같은 금액·같은 적요의 출금, 같은 날·같은 사람·같은 금액의 은행 입금)와
     파일 안에서 거래일자·거래시각·적요·금액·잔액이 모두 같은 줄은 중복으로 보고 건너뛴다.
     돌려주는 값: {"expenses": [번호], "payments": 건수, "duplicates": [줄 번호], "errors": [(줄 번호, 오류)]}"""
-    raise NotImplementedError("이 함수를 구현한다")
+    _, rows = read_csv_rows(path, mapping={key: key for key in BANK_COLUMNS})
+    result = {"expenses": [], "payments": 0, "duplicates": [], "errors": []}
+    seen = set()
+    for line, row in rows:
+        try:
+            if any(key not in row for key in BANK_COLUMNS):
+                raise ValueError("은행 거래내역의 필수 열이 없습니다")
+            fingerprint = tuple(row[key] for key in BANK_COLUMNS)
+            if fingerprint in seen:
+                result["duplicates"].append(line)
+                continue
+            day = dates.fmt(row["거래일자"].replace(".", "-"))
+            try:
+                dt.datetime.strptime(row["거래시각"], "%H:%M")
+            except ValueError:
+                raise ValueError("거래시각은 실제 있는 24시간 시각(HH:MM)이어야 합니다") from None
+            outgoing = _amount(row["출금액"] or 0)
+            incoming = _amount(row["입금액"] or 0)
+            _amount(row["잔액"])  # 음수 잔액도 허용한다. 잔고 자체를 새 입금으로 넣지는 않는다.
+            if outgoing < 0 or incoming < 0 or (outgoing > 0) == (incoming > 0):
+                raise ValueError("출금과 입금 중 한 쪽만 1원 이상이어야 합니다")
+            memo = row["적요"]
+            if outgoing:
+                duplicate = any(
+                    not e.get("deleted") and dates.fmt(e["date"]) == day
+                    and _amount(e["amount"]) == outgoing and e.get("memo", "") == memo
+                    for e in store.data.get("expenses", [])
+                )
+                if duplicate:
+                    result["duplicates"].append(line)
+                    seen.add(fingerprint)
+                    continue
+                expense = ledger.insert(store, day, treasurer, outgoing,
+                    active_members(store, day), memo=memo, action="bank")
+                result["expenses"].append(expense["id"])
+            else:
+                duplicate = any(
+                    p.get("source") == "bank" and dates.fmt(p["date"]) == day
+                    and p["member"] == memo and _amount(p["amount"]) == incoming
+                    for p in _payments(store)
+                )
+                if duplicate:
+                    result["duplicates"].append(line)
+                    seen.add(fingerprint)
+                    continue
+                payment = record_payment(store, day, memo, incoming, memo=memo)
+                payment["source"] = "bank"
+                result["payments"] += 1
+            seen.add(fingerprint)
+        except ValueError as error:
+            result["errors"].append((line, str(error)))
+    return result

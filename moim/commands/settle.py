@@ -21,27 +21,12 @@ def add_parser(sub, period_args):
     return grp
 
 
-def _table(headers, rows, numeric):
-    """표 문자열. textfmt.table(규격 6-1, 기능 3)을 쓰고, 아직 구현 전이면 같은 모양으로 직접 그린다."""
-    try:
-        return textfmt.table(headers, rows, numeric=numeric)
-    except NotImplementedError:
-        pass
-    cells = [[money.fmt(v) if type(v) is int else str(v) for v in row] for row in rows]
-    widths = [max([textfmt.width(h)] + [textfmt.width(r[i]) for r in cells]) for i, h in enumerate(headers)]
-
-    def line(row, align):
-        return "  ".join(textfmt.pad(v, widths[i], right=align and i in numeric) for i, v in enumerate(row)).rstrip()
-
-    return "\n".join([line(headers, False), "  ".join("-" * w for w in widths)] + [line(r, True) for r in cells])
-
-
 def balance_lines(rows):
     """balances 결과를 화면 줄 목록으로. 마지막 줄은 잔액 합계 검사(규칙대로면 0)."""
     if not rows:
         return ["이 기간에 정산할 지출·송금이 없습니다"]
     body = [[name, r["paid"], r["owed"], r["sent"], r["received"], r["balance"]] for name, r in rows.items()]
-    lines = _table(HEADERS, body, numeric={1, 2, 3, 4, 5}).split("\n")
+    lines = textfmt.table(HEADERS, body, numeric={1, 2, 3, 4, 5}).split("\n")   # 규격 6-1 (기능 3)
     total = settle.balance_sum(rows)
     if total == 0:
         lines.append("잔액 합계: 0")
