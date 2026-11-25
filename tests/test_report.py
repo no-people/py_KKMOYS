@@ -405,6 +405,10 @@ class TestSearch(unittest.TestCase):
         res = report_feature.search(self.store, start="2026-11-01", end="2026-11-10")
         self.assertEqual([e["id"] for e in res], [3, 1, 2])
 
+    def test_start_only_without_end(self):
+        res = report_feature.search(self.store, start="2026-11-10")
+        self.assertEqual([e["id"] for e in res], [1, 2, 4])
+
     def test_person_matches_payer_or_member(self):
         # 이서연은 1번(payer), 2번(member) 모두에 해당
         res = report_feature.search(self.store, person="이서연")
@@ -419,6 +423,48 @@ class TestSearch(unittest.TestCase):
             report_feature.search(self.store, start="2026-11-20", end="2026-11-10")
         with self.assertRaises(ValueError):
             report_feature.search(self.store, min_amount=20000, max_amount=10000)
+
+    def test_report_search_command_month_empty_and_total(self):
+        empty_lines = []
+        changed_empty = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start=None,
+                end=None,
+                month="2025-01",
+                person=None,
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            empty_lines.append,
+        )
+        self.assertFalse(changed_empty)
+        self.assertEqual(empty_lines, ["검색 결과가 없습니다."])
+
+        lines = []
+        changed = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start=None,
+                end=None,
+                month="2026-11",
+                person="이서연",
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("이서연", lines[0])
+        self.assertIn("20,000", lines[0])
+        self.assertIn("2 건", lines[0])
 
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):

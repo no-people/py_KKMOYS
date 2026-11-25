@@ -5,8 +5,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import money, textfmt
-from ..common import money
+from ..common import dates, money, textfmt
 from ..features import report as report_feat
 
 GROUP = 'report'
@@ -14,22 +13,36 @@ GROUP = 'report'
 
 def add_parser(sub, period_args):
     grp = sub.add_parser(GROUP, help="보고서").add_subparsers(dest="cmd")
+    s_mom = grp.add_parser("mom", help="전월 대비 증감과 증감률")
+    s_mom.add_argument("--month", required=True, help="기준 월 (YYYY-MM)")
+
     s_search = grp.add_parser("search", help="지출 검색")
     period_args(s_search)
     s_search.add_argument("--person", default=None, help="낸 사람 또는 참여자 이름")
     s_search.add_argument("--min", dest="min_amount", default=None, help="최소 금액")
     s_search.add_argument("--max", dest="max_amount", default=None, help="최대 금액")
     s_search.add_argument("--word", default=None, help="메모에 포함된 낱말")
-    s_mom = grp.add_parser("mom", help="전월 대비 증감과 증감률")
-    s_mom.add_argument("--month", required=True, help="기준 월 (YYYY-MM)")
     return grp
 
 
 def run(c, args, cfg, store, out):
+    if c == "mom":
+        cur, prev, diff, rate = report_feat.month_over_month(store, args.month)
+        sign = "+" if diff > 0 else ""
+        out(f"[{args.month} 전월 대비]")
+        out(f"지난달: {money.fmt(prev)}원")
+        out(f"이번 달: {money.fmt(cur)}원")
+        out(f"증감: {sign}{money.fmt(diff)}원")
+        if rate is None:
+            out("증감률: 지난달 지출이 0원이어서 계산할 수 없습니다.")
+        else:
+            out(f"증감률: {sign}{rate:.1f}%")
+        return False
+
     if c == "search":
         start, end = args.start, args.end
         if getattr(args, "month", None):
-            start, end = report_feat._month_bounds(report_feat._to_ym_tuple(args.month))
+            start, end = dates.month_range(*dates.parse_month(args.month))
 
         rows_data = report_feat.search(
             store,
@@ -44,30 +57,26 @@ def run(c, args, cfg, store, out):
             out("검색 결과가 없습니다.")
             return False
 
+        amounts = [money.to_won(e.get("amount", 0)) for e in rows_data]
         rows = [
-            [e.get("id", ""), e["date"], e.get("payer", ""), e["amount"], e.get("memo", "")]
-            for e in rows_data
+            [
+                e.get("id", ""),
+                e["date"],
+                e.get("payer", ""),
+                amt,
+                e.get("memo") or "",
+            ]
+            for e, amt in zip(rows_data, amounts)
         ]
-        total_amt = sum(e["amount"] for e in rows_data)
-        out(textfmt.table(
-            ["번호", "날짜", "낸 사람", "금액", "메모"],
-            rows,
-            total=["합계", "", "", total_amt, f"{len(rows_data)}건"],
-            numeric={0, 3},
-        ))
-        return False
-
-    if c == "mom":
-        cur, prev, diff, rate = report_feat.month_over_month(store, args.month)
-        sign = "+" if diff > 0 else ""
-        out(f"[{args.month} 전월 대비]")
-        out(f"지난달: {money.fmt(prev)}원")
-        out(f"이번 달: {money.fmt(cur)}원")
-        out(f"증감: {sign}{money.fmt(diff)}원")
-        if rate is None:
-            out("증감률: 지난달 지출이 0원이어서 계산할 수 없습니다.")
-        else:
-            out(f"증감률: {sign}{rate:.1f}%")
+        total_amt = sum(amounts)
+        out(
+            textfmt.table(
+                ["번호", "날짜", "낸 사람", "금액", "메모"],
+                rows,
+                total=["합계", "", "", total_amt, f"{len(rows_data)} 건"],
+                numeric={0, 3},
+            )
+        )
         return False
 
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
