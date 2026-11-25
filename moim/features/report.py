@@ -142,11 +142,6 @@ def biggest_day(store, start, end):
     raise NotImplementedError("이 함수를 구현한다")
 
 
-def month_bounds(month):
-    """'YYYY-MM' 또는 (연, 월) 을 (시작일, 끝일) 문자열로 바꾼다. 명령 묶음이 기간을 고를 때 쓴다."""
-    return _month_bounds(_to_ym_tuple(month))
-
-
 def category_table(store, start, end):
     """기간의 분류별 건수·금액 표와 금액 막대그래프. 금액 큰 순, 미분류는 맨 뒤."""
     totals = category_totals(store, start, end) or {}

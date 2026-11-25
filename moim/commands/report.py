@@ -6,6 +6,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 """
 
 from ..common import dates, money, textfmt
+from ..common.cliutil import _period
 from ..features import report as report_feat
 
 GROUP = 'report'
@@ -90,12 +91,7 @@ def run(c, args, cfg, store, out):
         return False
 
     if c == "category":
-        if args.month:
-            start, end = report_feat.month_bounds(args.month)
-        elif args.start and args.end:
-            start, end = args.start, args.end
-        else:
-            raise ValueError("--month 또는 --start 와 --end 를 함께 지정하세요")
+        start, end = _period(args)
         out(report_feat.category_table(store, start, end))
         return False
 

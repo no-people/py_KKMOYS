@@ -575,6 +575,7 @@ class TestReportTables(unittest.TestCase):
                     {"id": 3, "date": "2026-11-14", "payer": "김민수", "amount": 2000, "members": ["김민수"], "category": None},
                     {"id": 4, "date": "2026-11-15", "payer": "이서연", "amount": 4000, "members": ["이서연"], "category": "식비"},
                     {"id": 5, "date": "2026-10-15", "payer": "김민수", "amount": 3000, "members": ["김민수"], "category": "교통"},
+                    {"id": 6, "date": "2026-11-20", "payer": "박지훈", "amount": 50000, "members": ["박지훈"], "category": "식비", "deleted": True},
                 ]
             }
         )
@@ -589,6 +590,7 @@ class TestReportTables(unittest.TestCase):
         self.assertLess(t.index("교통"), t.index("미분류"))
         self.assertIn("합계", t)
         self.assertIn("21,000", t)
+        self.assertNotIn("71,000", t)
         b = self._bars(out)
         self.assertEqual((b["식비"], b["교통"], b["미분류"]), (30, 27, 6))
 
@@ -605,8 +607,42 @@ class TestReportTables(unittest.TestCase):
         self.assertIn("#" * 30, out)
         self.assertIn("[인원별 지출]", out)
 
-    def test_month_bounds(self):
-        self.assertEqual(report_feature.month_bounds("2026-02"), ("2026-02-01", "2026-02-28"))
+    def test_report_category_command_and_missing_period(self):
+        lines = []
+        changed = report_cmd.run(
+            "category",
+            SimpleNamespace(month="2026-11", start=None, end=None),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("식비", lines[0])
+        self.assertIn("21,000", lines[0])
+
+        with self.assertRaises(ValueError):
+            report_cmd.run(
+                "category",
+                SimpleNamespace(month=None, start=None, end=None),
+                {},
+                self._make_store(),
+                lines.append,
+            )
+
+    def test_report_monthly_command(self):
+        lines = []
+        changed = report_cmd.run(
+            "monthly",
+            SimpleNamespace(first="2026-10", last="2026-12"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("2026-11", lines[0])
+        self.assertIn("24,000", lines[0])
 
     def test_report_month_command(self):
         lines = []
@@ -621,7 +657,6 @@ class TestReportTables(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("[2026-11 월간 보고서]", lines[0])
         self.assertIn("21,000", lines[0])
-
 
 if __name__ == "__main__":
     unittest.main()
