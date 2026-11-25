@@ -5,7 +5,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import money, textfmt
+from ..common import dates, money, textfmt
 from ..common.cliutil import _period
 from ..features import report as report_feat
 
@@ -93,6 +93,8 @@ def run(c, args, cfg, store, out):
 
     if c == "category":
         start, end = _period(args)
+        if dates.parse(start) > dates.parse(end):
+            raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
         out(report_feat.category_table(store, start, end))
         return False
 

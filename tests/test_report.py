@@ -509,6 +509,12 @@ class TestSearch(unittest.TestCase):
       res_day = report_feature.search(self.store, start="2026-11-01", end="2026-11-01")
       self.assertEqual([e["id"] for e in res_day], [3])
 
+    def test_invalid_special_amount_raises_value_error(self):
+        for value in ("Infinity", "-Infinity", "NaN"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    report_feature.search(self.store, min_amount=value)
+
 
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):
@@ -647,7 +653,7 @@ class TestReportTables(unittest.TestCase):
         with self.assertRaises(ValueError):
             report_cmd.run(
                 "category",
-                SimpleNamespace(month=None, start=None, end=None),
+                SimpleNamespace(month=None, start="2026-11-30", end="2026-11-01"),
                 {},
                 self._make_store(),
                 lines.append,
