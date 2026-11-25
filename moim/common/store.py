@@ -9,6 +9,7 @@ import copy
 import json
 import os
 import re
+import stat
 import tempfile
 from datetime import datetime
 
@@ -65,7 +66,10 @@ class Store:
             data.setdefault(key, copy.deepcopy(value))
 
     def save(self):
-        """임시 파일에 쓰고 fsync한 뒤 백업·정리 후 os.replace로 원자적으로 교체한다."""
+        """임시 파일에 쓰고 fsync한 뒤 백업·os.replace로 교체하고 초과 백업을 정리한다.
+
+        keep == 0 이면 새 백업 파일을 만들지 않고 기존 백업만 정리한다.
+        """
         self._check_shape(self.data)
 
         target_dir = os.path.dirname(os.path.abspath(self.path))
@@ -79,7 +83,10 @@ class Store:
                 f.flush()
                 os.fsync(f.fileno())
 
-            if os.path.exists(self.path):
+            has_existing = os.path.exists(self.path)
+            existing_mode = None
+            if has_existing:
+                existing_mode = stat.S_IMODE(os.stat(self.path).st_mode)
                 if self.keep > 0:
                     os.makedirs(self.backup_dir, exist_ok=True)
                     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -90,16 +97,23 @@ class Store:
                         dst.flush()
                         os.fsync(dst.fileno())
 
-                    existing = self.backups()
-                    if len(existing) > self.keep:
-                        for old_path in existing[:-self.keep]:
-                            os.remove(old_path)
-                else:
-                    for old_path in self.backups():
-                        os.remove(old_path)
+            if existing_mode is not None:
+                try:
+                    os.chmod(tmp_path, existing_mode)
+                except OSError:
+                    pass
 
             os.replace(tmp_path, self.path)
             tmp_path = None
+
+            if has_existing:
+                existing = self.backups()
+                if self.keep == 0:
+                    for old_path in existing:
+                        os.remove(old_path)
+                elif len(existing) > self.keep:
+                    for old_path in existing[:-self.keep]:
+                        os.remove(old_path)
         except BaseException:
             if tmp_path and os.path.exists(tmp_path):
                 try:
