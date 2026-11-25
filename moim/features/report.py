@@ -192,23 +192,18 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
 
     keyword = word.strip() if isinstance(word, str) else word
 
+    eff_start = start if start is not None else "0001-01-01"
+    eff_end = end if end is not None else "9999-12-31"
+    candidates = expenses_in(store, eff_start, eff_end)
+
     results = []
-    for e in store.data.get("expenses", []):
-        if e.get("deleted"):
-            continue
-
-        e_date = dates.parse(e["date"])
-        if start_d is not None and e_date < start_d:
-            continue
-        if end_d is not None and e_date > end_d:
-            continue
-
+    for e in candidates:
         if person is not None:
             members = e.get("members") or []
             if e.get("payer") != person and person not in members:
                 continue
 
-        amt = e.get("amount", 0)
+        amt = money.to_won(e.get("amount", 0))
         if min_won is not None and amt < min_won:
             continue
         if max_won is not None and amt > max_won:
@@ -221,5 +216,4 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
 
         results.append(e)
 
-    results.sort(key=lambda e: (e["date"], e.get("id", 0)))
     return results
