@@ -565,5 +565,63 @@ class TestMonthOverMonth(unittest.TestCase):
         self.assertEqual(lines[4], "증감률: 지난달 지출이 0원이어서 계산할 수 없습니다.")
 
 
+class TestReportTables(unittest.TestCase):
+    def _make_store(self):
+        return SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-11-12", "payer": "이서연", "amount": 6000, "members": ["이서연"], "category": "식비"},
+                    {"id": 2, "date": "2026-11-13", "payer": "김민수", "amount": 9000, "members": ["김민수"], "category": "교통"},
+                    {"id": 3, "date": "2026-11-14", "payer": "김민수", "amount": 2000, "members": ["김민수"], "category": None},
+                    {"id": 4, "date": "2026-11-15", "payer": "이서연", "amount": 4000, "members": ["이서연"], "category": "식비"},
+                    {"id": 5, "date": "2026-10-15", "payer": "김민수", "amount": 3000, "members": ["김민수"], "category": "교통"},
+                ]
+            }
+        )
+
+    def _bars(self, out):
+        return {line.split()[0]: line.count("#") for line in out.split("\n\n")[1].splitlines()}
+
+    def test_category_table_order_total_and_bars(self):
+        out = report_feature.category_table(self._make_store(), "2026-11-01", "2026-11-30")
+        t = out.split("\n\n")[0]
+        self.assertLess(t.index("식비"), t.index("교통"))
+        self.assertLess(t.index("교통"), t.index("미분류"))
+        self.assertIn("합계", t)
+        self.assertIn("21,000", t)
+        b = self._bars(out)
+        self.assertEqual((b["식비"], b["교통"], b["미분류"]), (30, 27, 6))
+
+    def test_monthly_table_total_and_bars(self):
+        out = report_feature.monthly_table(self._make_store(), (2026, 10), (2026, 12))
+        self.assertIn("24,000", out.split("\n\n")[0])
+        b = self._bars(out)
+        self.assertEqual((b["2026-10"], b["2026-11"], b["2026-12"]), (4, 30, 0))
+
+    def test_month_report_uses_tables(self):
+        out = report_feature.month_report(self._make_store(), "2026-11")
+        self.assertIn("[분류별 지출]", out)
+        self.assertIn("합계", out)
+        self.assertIn("#" * 30, out)
+        self.assertIn("[인원별 지출]", out)
+
+    def test_month_bounds(self):
+        self.assertEqual(report_feature.month_bounds("2026-02"), ("2026-02-01", "2026-02-28"))
+
+    def test_report_month_command(self):
+        lines = []
+        changed = report_cmd.run(
+            "month",
+            SimpleNamespace(month="2026-11"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("[2026-11 월간 보고서]", lines[0])
+        self.assertIn("21,000", lines[0])
+
+
 if __name__ == "__main__":
     unittest.main()

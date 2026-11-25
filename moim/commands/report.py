@@ -22,6 +22,15 @@ def add_parser(sub, period_args):
     s_search.add_argument("--min", dest="min_amount", default=None, help="최소 금액")
     s_search.add_argument("--max", dest="max_amount", default=None, help="최대 금액")
     s_search.add_argument("--word", default=None, help="메모에 포함된 낱말")
+
+    s_cat = grp.add_parser("category", help="분류별 건수·금액 표와 막대그래프")
+    period_args(s_cat)
+    s_mon = grp.add_parser("monthly", help="월별 지출 합계 표와 막대그래프")
+    s_mon.add_argument("--from", dest="first", required=True, help="시작 월 (YYYY-MM)")
+    s_mon.add_argument("--to", dest="last", required=True, help="끝 월 (YYYY-MM)")
+
+    s_month = grp.add_parser("month", help="월간 보고서")
+    s_month.add_argument("--month", required=True, help="기준 월 (YYYY-MM)")
     return grp
 
 
@@ -78,6 +87,24 @@ def run(c, args, cfg, store, out):
                 numeric={0, 3},
             )
         )
+        return False
+
+    if c == "category":
+        if args.month:
+            start, end = report_feat.month_bounds(args.month)
+        elif args.start and args.end:
+            start, end = args.start, args.end
+        else:
+            raise ValueError("--month 또는 --start 와 --end 를 함께 지정하세요")
+        out(report_feat.category_table(store, start, end))
+        return False
+
+    if c == "monthly":
+        out(report_feat.monthly_table(store, args.first, args.last))
+        return False 
+
+    if c == "month":
+        out(report_feat.month_report(store, args.month).rstrip("\n"))
         return False
 
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
