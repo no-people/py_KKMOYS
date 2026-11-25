@@ -180,9 +180,7 @@ def save_report(text, path):
 
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
-    start_d = dates.parse(start) if start is not None else None
-    end_d = dates.parse(end) if end is not None else None
-    if start_d is not None and end_d is not None and start_d > end_d:
+    if start is not None and end is not None and dates.parse(start) > dates.parse(end):
         raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
 
     min_won = money.to_won(min_amount) if min_amount is not None else None
