@@ -438,7 +438,7 @@ class TestSearch(unittest.TestCase):
                 word=None,
             ),
             {},
-            self.store,
+            SimpleNamespace(data={"expenses": []}),
             empty_lines.append,
         )
         self.assertFalse(changed_empty)
@@ -465,6 +465,38 @@ class TestSearch(unittest.TestCase):
         self.assertIn("이서연", lines[0])
         self.assertIn("20,000", lines[0])
         self.assertIn("2 건", lines[0])
+
+    def test_empty_or_whitespace_amount_and_word_are_ignored(self):
+        res_amt = report_feature.search(self.store, min_amount="", max_amount="   ")
+        self.assertEqual([e["id"] for e in res_amt], [3, 1, 2, 4])
+
+        res_word = report_feature.search(self.store, word="   ")
+        self.assertEqual([e["id"] for e in res_word], [3, 1, 2, 4])
+
+    def test_invalid_amount_string_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, min_amount="abc")
+
+    def test_command_search_invalid_range_outputs_error(self):
+        lines = []
+        changed = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start="2026-11-20",
+                end="2026-11-10",
+                month=None,
+                person=None,
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("오류:"))
 
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):

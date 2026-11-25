@@ -44,15 +44,20 @@ def run(c, args, cfg, store, out):
         if getattr(args, "month", None):
             start, end = dates.month_range(*dates.parse_month(args.month))
 
-        rows_data = report_feat.search(
-            store,
-            start=start,
-            end=end,
-            person=args.person,
-            min_amount=args.min_amount,
-            max_amount=args.max_amount,
-            word=args.word,
-        )
+        try:
+            rows_data = report_feat.search(
+                store,
+                start=start,
+                end=end,
+                person=args.person,
+                min_amount=args.min_amount,
+                max_amount=args.max_amount,
+                word=args.word,
+            )
+        except ValueError as exc:
+            out(f"오류: {exc}")
+            return False
+
         if not rows_data:
             out("검색 결과가 없습니다.")
             return False
@@ -61,7 +66,7 @@ def run(c, args, cfg, store, out):
         rows = [
             [
                 e.get("id", ""),
-                e["date"],
+                e.get("date", ""),
                 e.get("payer", ""),
                 amt,
                 e.get("memo") or "",
@@ -78,6 +83,3 @@ def run(c, args, cfg, store, out):
             )
         )
         return False
-
-    out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
-    return False
