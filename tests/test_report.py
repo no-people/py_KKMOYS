@@ -316,7 +316,7 @@ class TestReportFeature(unittest.TestCase):
         self.assertIn("28,000", str_text)
 
     def test_invalid_year_month_raises_value_error(self):
-        for bad_ym in [(2026, 0), (2026, 13), ("bad",), True]:
+        for bad_ym in [(0, 1), (-1, 1), "0000-01", (2026, 0), (2026, 13), ("bad",), True]:
             with self.subTest(bad_ym=bad_ym):
                 with self.assertRaises(ValueError):
                     report_feature._to_ym_tuple(bad_ym)
@@ -607,6 +607,21 @@ class TestReportTables(unittest.TestCase):
         self.assertIn("24,000", out.split("\n\n")[0])
         b = self._bars(out)
         self.assertEqual((b["2026-10"], b["2026-11"], b["2026-12"]), (4, 30, 0))
+
+    def test_monthly_table_all_zero_period(self):
+        # 지출이 전혀 없는 기간(2025-01 ~ 2025-03): 모든 월 0원, 합계 0원, 막대 없이 그래프 출력
+        out = report_feature.monthly_table(self._make_store(), "2025-01", "2025-03")
+        table_part, chart_part = out.split("\n\n")
+        for ym in ("2025-01", "2025-02", "2025-03"):
+            self.assertIn(ym, table_part)
+            self.assertIn(ym, chart_part)
+        self.assertIn("합계", table_part)
+        self.assertNotIn("#", chart_part)
+        # 표의 데이터·합계 줄이 모두 0원인지 확인
+        data_lines = [line for line in table_part.splitlines() if line.startswith(("2025-", "합계"))]
+        self.assertEqual(len(data_lines), 4)
+        for line in data_lines:
+            self.assertTrue(line.endswith("  0"))
 
     def test_month_report_uses_tables(self):
         out = report_feature.month_report(self._make_store(), "2026-11")
