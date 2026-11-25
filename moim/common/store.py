@@ -8,6 +8,8 @@ save·backups·recover 는 팀 공동 작업 "자료 파일 손상 대응" 담�
 import copy
 import json
 import os
+import re
+import tempfile
 from datetime import datetime
 
 EMPTY = {
@@ -28,9 +30,13 @@ EMPTY = {
     "transfers": [],    # {"date", "from", "to", "amount"} 이미 보낸 송금(부분 정산). from 이 to 에게 amount 원. 기능 4
 }
 
+_BACKUP_NAME_RE = re.compile(r"^data-\d{8}-\d{6}-\d{6}\.json$")
+
 
 class Store:
     def __init__(self, path, backup_dir=None, keep=10):
+        if isinstance(keep, bool) or not isinstance(keep, int) or keep < 0:
+            raise ValueError("keep은 0 이상의 정수여야 합니다")
         self.path = path
         self.backup_dir = backup_dir or os.path.join(os.path.dirname(os.path.abspath(path)), "backup")
         self.keep = keep
@@ -59,17 +65,100 @@ class Store:
             data.setdefault(key, copy.deepcopy(value))
 
     def save(self):
-        """지금은 그냥 덮어쓴다. 저장 도중 멈추면 파일이 깨질 수 있다(자료 파일 손상 대응 담당이 고친다)."""
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, ensure_ascii=False, indent=2)
+        """임시 파일에 쓰고 fsync한 뒤 백업·정리 후 os.replace로 원자적으로 교체한다."""
+        self._check_shape(self.data)
+
+        target_dir = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(target_dir, exist_ok=True)
+
+        tmp_path = None
+        try:
+            fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=target_dir)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+
+            if os.path.exists(self.path):
+                if self.keep > 0:
+                    os.makedirs(self.backup_dir, exist_ok=True)
+                    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                    backup_name = f"data-{stamp}.json"
+                    backup_path = os.path.join(self.backup_dir, backup_name)
+                    with open(self.path, "rb") as src, open(backup_path, "wb") as dst:
+                        dst.write(src.read())
+                        dst.flush()
+                        os.fsync(dst.fileno())
+
+                    existing = self.backups()
+                    if len(existing) > self.keep:
+                        for old_path in existing[:-self.keep]:
+                            os.remove(old_path)
+                else:
+                    for old_path in self.backups():
+                        os.remove(old_path)
+
+            os.replace(tmp_path, self.path)
+            tmp_path = None
+        except BaseException:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
 
     def backups(self):
         """백업 파일 목록(오래된 것부터)."""
-        raise NotImplementedError("자료 파일 손상 대응 담당이 구현한다")
+        if not os.path.isdir(self.backup_dir):
+            return []
+        matched = [
+            os.path.join(self.backup_dir, name)
+            for name in os.listdir(self.backup_dir)
+            if _BACKUP_NAME_RE.fullmatch(name) and os.path.isfile(os.path.join(self.backup_dir, name))
+        ]
+        matched.sort(key=lambda p: os.path.basename(p))
+        return matched
+
+    def _next_broken_path(self):
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base_path = f"{self.path}.broken-{stamp}"
+        if not os.path.exists(base_path):
+            return base_path
+        idx = 1
+        while True:
+            candidate = f"{base_path}-{idx}"
+            if not os.path.exists(candidate):
+                return candidate
+            idx += 1
 
     def recover(self):
-        """깨진 파일을 옆에 남기고 마지막 정상 백업을 불러온다. 불러온 백업 경로를 recovered_from 에 둔다."""
-        raise NotImplementedError("자료 파일 손상 대응 담당이 구현한다")
+        """사용 가능한 정상 백업을 먼저 찾은 뒤 깨진 파일을 옆에 남기고 복구한다."""
+        candidates = list(reversed(self.backups()))
+        selected_backup = None
+        selected_data = None
+
+        for backup_path in candidates:
+            try:
+                with open(backup_path, encoding="utf-8") as f:
+                    loaded = json.load(f)
+                self._check_shape(loaded)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                continue
+            selected_backup = backup_path
+            selected_data = loaded
+            break
+
+        if selected_backup is None or selected_data is None:
+            raise ValueError("복구할 수 있는 정상 백업 파일이 없습니다")
+
+        if os.path.exists(self.path):
+            broken_path = self._next_broken_path()
+            os.replace(self.path, broken_path)
+
+        self.data = selected_data
+        self.recovered_from = selected_backup
+        return self
 
     def new_id(self):
         eid = self.data["next_id"]
