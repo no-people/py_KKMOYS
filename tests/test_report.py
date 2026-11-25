@@ -501,6 +501,14 @@ class TestSearch(unittest.TestCase):
                 lines.append,
             )
 
+    def test_exact_amount_and_same_start_end_date(self):
+      # 최소 금액 == 최대 금액, 시작일 == 종료일 경계 검증
+      res_amt = report_feature.search(self.store, min_amount=15000, max_amount=15000)
+      self.assertEqual([e["id"] for e in res_amt], [2])
+
+      res_day = report_feature.search(self.store, start="2026-11-01", end="2026-11-01")
+      self.assertEqual([e["id"] for e in res_day], [3])
+
 
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):

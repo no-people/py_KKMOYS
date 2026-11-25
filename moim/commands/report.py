@@ -5,7 +5,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
-from ..common import dates, money, textfmt
+from ..common import money, textfmt
 from ..common.cliutil import _period
 from ..features import report as report_feat
 
@@ -50,9 +50,10 @@ def run(c, args, cfg, store, out):
         return False
 
     if c == "search":
-        start, end = args.start, args.end
-        if getattr(args, "month", None):
-            start, end = dates.month_range(*dates.parse_month(args.month))
+        if getattr(args, "month", None) or getattr(args, "start", None) or getattr(args, "end", None):
+            start, end = _period(args)
+        else:
+            start, end = None, None
 
         rows_data = report_feat.search(
             store,

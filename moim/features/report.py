@@ -254,4 +254,5 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
 
         results.append(e)
 
+    results.sort(key=lambda e: (dates.parse(e["date"]), e.get("id", 0)))
     return results
