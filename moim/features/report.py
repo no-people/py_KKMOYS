@@ -194,8 +194,8 @@ def _normalize_amount(raw, label):
 
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
-    eff_start = start.strip() if isinstance(start, str) and start.strip() else None
-    eff_end = end.strip() if isinstance(end, str) and end.strip() else None
+    eff_start = start.strip() or None if isinstance(start, str) else start
+    eff_end = end.strip() or None if isinstance(end, str) else end
 
     if eff_start is not None and eff_end is not None:
         if dates.parse(eff_start) > dates.parse(eff_end):
