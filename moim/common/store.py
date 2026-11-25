@@ -68,7 +68,8 @@ class Store:
     def save(self):
         """임시 파일에 쓰고 fsync한 뒤 백업·os.replace로 교체하고 초과 백업을 정리한다.
 
-        keep == 0 이면 새 백업 파일을 만들지 않고 기존 백업만 정리한다.
+        기존 파일이 있으면 권한 모드를 유지하며, 기존 파일이 없을 때 새로 만든 파일은
+        mkstemp 기본 권한(0o600)으로 남는다. keep == 0 이면 새 백업을 만들지 않고 기존 백업만 정리한다.
         """
         self._check_shape(self.data)
 
@@ -76,6 +77,7 @@ class Store:
         os.makedirs(target_dir, exist_ok=True)
 
         tmp_path = None
+        backup_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=target_dir)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -105,19 +107,28 @@ class Store:
 
             os.replace(tmp_path, self.path)
             tmp_path = None
+            backup_path = None
 
             if has_existing:
-                existing = self.backups()
-                if self.keep == 0:
-                    for old_path in existing:
-                        os.remove(old_path)
-                elif len(existing) > self.keep:
-                    for old_path in existing[:-self.keep]:
-                        os.remove(old_path)
+                try:
+                    existing = self.backups()
+                    if self.keep == 0:
+                        for old_path in existing:
+                            os.remove(old_path)
+                    elif len(existing) > self.keep:
+                        for old_path in existing[:-self.keep]:
+                            os.remove(old_path)
+                except OSError:
+                    pass
         except BaseException:
             if tmp_path and os.path.exists(tmp_path):
                 try:
                     os.remove(tmp_path)
+                except OSError:
+                    pass
+            if backup_path and os.path.exists(backup_path):
+                try:
+                    os.remove(backup_path)
                 except OSError:
                     pass
             raise
