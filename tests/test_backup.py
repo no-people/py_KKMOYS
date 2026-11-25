@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -48,12 +49,10 @@ class TestStoreBackupAndRecovery(unittest.TestCase):
             store = Store(data_path, keep=10)
 
             with patch("moim.common.store.datetime", _SteppingDateTime):
-                # 1번째 저장: 직전 파일이 없으므로 백업 0개
                 store.data["next_id"] = 1
                 store.save()
                 self.assertEqual(store.backups(), [])
 
-                # 이후 12번 추가 저장(총 13번 저장): 직전 12개 중 최근 10개만 유지
                 for step in range(2, 14):
                     store.data["next_id"] = step
                     store.data["expenses"] = [
@@ -146,6 +145,70 @@ class TestStoreBackupAndRecovery(unittest.TestCase):
 
             leftover_tmp = [name for name in os.listdir(tmpdir) if name.startswith(".tmp-")]
             self.assertEqual(leftover_tmp, [])
+
+    def test_replace_failure_preserves_original_and_existing_backups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = os.path.join(tmpdir, "data.json")
+            _SteppingDateTime.configure(datetime(2026, 11, 23, 12, 0, 0), timedelta(seconds=1))
+            store = Store(data_path, keep=1)
+
+            with patch("moim.common.store.datetime", _SteppingDateTime):
+                store.data["next_id"] = 1
+                store.save()
+                store.data["next_id"] = 2
+                store.save()
+                store.data["next_id"] = 3
+                store.save()
+
+                backups_before = store.backups()
+                self.assertEqual(len(backups_before), 1)
+                existing_backup = backups_before[0]
+
+                store.data["next_id"] = 4
+                with patch("moim.common.store.os.replace", side_effect=OSError("replace failed")):
+                    with self.assertRaises(OSError):
+                        store.save()
+
+            self.assertIn(existing_backup, store.backups())
+            reloaded = Store(data_path).load()
+            self.assertEqual(reloaded.data["next_id"], 3)
+
+            leftover_tmp = [name for name in os.listdir(tmpdir) if name.startswith(".tmp-")]
+            self.assertEqual(leftover_tmp, [])
+
+    def test_cleanup_oserror_does_not_fail_saved_data(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = os.path.join(tmpdir, "data.json")
+            _SteppingDateTime.configure(datetime(2026, 11, 23, 12, 0, 0), timedelta(seconds=1))
+            store = Store(data_path, keep=1)
+
+            with patch("moim.common.store.datetime", _SteppingDateTime):
+                store.data["next_id"] = 1
+                store.save()
+                store.data["next_id"] = 2
+                store.save()
+
+            store.data["next_id"] = 3
+            with patch("moim.common.store.os.remove", side_effect=OSError("locked")):
+                store.save()
+
+            reloaded = Store(data_path).load()
+            self.assertEqual(reloaded.data["next_id"], 3)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX 파일 권한 모드는 POSIX 환경에서만 검증합니다")
+    def test_preserves_existing_file_mode_on_posix(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = os.path.join(tmpdir, "data.json")
+            store = Store(data_path)
+            store.data["next_id"] = 1
+            store.save()
+
+            os.chmod(data_path, 0o640)
+            store.data["next_id"] = 2
+            store.save()
+
+            mode = stat.S_IMODE(os.stat(data_path).st_mode)
+            self.assertEqual(mode, 0o640)
 
     def test_recover_moves_broken_file_and_restores_latest_valid_backup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
