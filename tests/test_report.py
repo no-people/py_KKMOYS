@@ -728,7 +728,11 @@ class TestWeekdayAndWeekTotals(unittest.TestCase):
         self.assertIn("25,000", lines[0])
 
     def test_week_totals_monday_start_and_command(self):
-        # 2026-11-02(월) ~ 2026-11-18(수): 11-02, 11-09(0원), 11-16 세 주
+        # 1. 기간이 한 주(2026-11-02 월 ~ 2026-11-08 일) 안에 들어가는 경우
+        single_week = report_feature.week_totals(self._make_store(), "2026-11-02", "2026-11-08")
+        self.assertEqual(single_week, {"2026-11-02": 15000})
+
+        # 2. 2026-11-02(월) ~ 2026-11-18(수): 11-02, 11-09(0원), 11-16 세 주
         res = report_feature.week_totals(self._make_store(), "2026-11-02", "2026-11-18")
         self.assertEqual(res, {"2026-11-02": 15000, "2026-11-09": 0, "2026-11-16": 10000})
 
@@ -745,6 +749,8 @@ class TestWeekdayAndWeekTotals(unittest.TestCase):
         self.assertIn("25,000", lines[0])
 
     def test_reversed_period_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.weekday_totals(self._make_store(), "2026-11-20", "2026-11-01")
         with self.assertRaises(ValueError):
             report_feature.week_totals(self._make_store(), "2026-11-20", "2026-11-01")
 

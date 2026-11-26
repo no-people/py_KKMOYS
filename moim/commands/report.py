@@ -36,7 +36,10 @@ def add_parser(sub, period_args):
     s_wday = grp.add_parser("weekday", help="요일별 지출 합계 표와 막대그래프")
     period_args(s_wday)
 
-    s_week = grp.add_parser("week", help="주(월요일 시작)별 지출 합계 표와 막대그래프")
+    s_week = grp.add_parser(
+        "week",
+        help="주(월요일 시작)별 지출 합계 표와 막대그래프(첫 주 시작일은 해당 주 월요일로 표시되며 기간 내 지출만 합산)",
+    )
     period_args(s_week)
     return grp
 
@@ -105,15 +108,11 @@ def run(c, args, cfg, store, out):
 
     if c == "weekday":
         start, end = _period(args)
-        if dates.parse(start) > dates.parse(end):
-            raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
         out(report_feat.weekday_table(store, start, end))
         return False
 
     if c == "week":
         start, end = _period(args)
-        if dates.parse(start) > dates.parse(end):
-            raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
         out(report_feat.week_table(store, start, end))
         return False
 
