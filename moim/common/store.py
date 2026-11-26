@@ -65,13 +65,14 @@ class Store:
             data.setdefault(key, copy.deepcopy(value))
 
     def save(self):
-        """임시 파일에 쓰고 fsync한 뒤 백업·정리 후 os.replace로 원자적으로 교체한다."""
+        """임시 파일에 쓰고 fsync한 뒤 백업·os.replace로 교체하고 이후 오래된 백업을 정리한다."""
         self._check_shape(self.data)
 
         target_dir = os.path.dirname(os.path.abspath(self.path))
         os.makedirs(target_dir, exist_ok=True)
 
         tmp_path = None
+        backup_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=target_dir)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -80,30 +81,42 @@ class Store:
                 os.fsync(f.fileno())
 
             if os.path.exists(self.path):
-                if self.keep > 0:
-                    os.makedirs(self.backup_dir, exist_ok=True)
-                    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-                    backup_name = f"data-{stamp}.json"
-                    backup_path = os.path.join(self.backup_dir, backup_name)
-                    with open(self.path, "rb") as src, open(backup_path, "wb") as dst:
-                        dst.write(src.read())
-                        dst.flush()
-                        os.fsync(dst.fileno())
-
-                    existing = self.backups()
-                    if len(existing) > self.keep:
-                        for old_path in existing[:-self.keep]:
-                            os.remove(old_path)
-                else:
-                    for old_path in self.backups():
-                        os.remove(old_path)
+                os.makedirs(self.backup_dir, exist_ok=True)
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                backup_name = f"data-{stamp}.json"
+                backup_path = os.path.join(self.backup_dir, backup_name)
+                with open(self.path, "rb") as src, open(backup_path, "wb") as dst:
+                    dst.write(src.read())
+                    dst.flush()
+                    os.fsync(dst.fileno())
 
             os.replace(tmp_path, self.path)
             tmp_path = None
+            backup_path = None
+
+            if self.keep == 0:
+                for old_path in self.backups():
+                    try:
+                        os.remove(old_path)
+                    except OSError:
+                        pass
+            else:
+                existing = self.backups()
+                if len(existing) > self.keep:
+                    for old_path in existing[:-self.keep]:
+                        try:
+                            os.remove(old_path)
+                        except OSError:
+                            pass
         except BaseException:
             if tmp_path and os.path.exists(tmp_path):
                 try:
                     os.remove(tmp_path)
+                except OSError:
+                    pass
+            if backup_path and os.path.exists(backup_path):
+                try:
+                    os.remove(backup_path)
                 except OSError:
                     pass
             raise
