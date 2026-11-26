@@ -178,6 +178,69 @@ def save_report(text, path):
     raise NotImplementedError("이 함수를 구현한다")
 
 
+def _normalize_amount(raw, label):
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        if cleaned == "":
+            return None
+        raw = cleaned
+    try:
+        return money.to_won(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} 금액 형식이 올바르지 않습니다: {raw!r}") from exc
+
+
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
-    raise NotImplementedError("이 함수를 구현한다")
+    eff_start = start.strip() or None if isinstance(start, str) else start
+    eff_end = end.strip() or None if isinstance(end, str) else end
+
+    if eff_start is not None and eff_end is not None:
+        if dates.parse(eff_start) > dates.parse(eff_end):
+            raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
+    elif eff_start is not None:
+        dates.parse(eff_start)
+    elif eff_end is not None:
+        dates.parse(eff_end)
+
+    min_won = _normalize_amount(min_amount, "최소")
+    max_won = _normalize_amount(max_amount, "최대")
+    if min_won is not None and max_won is not None and min_won > max_won:
+        raise ValueError("최소 금액이 최대 금액보다 클 수 없습니다.")
+
+    keyword = word.strip() if isinstance(word, str) else word
+    if isinstance(keyword, str) and keyword == "":
+        keyword = None
+
+    person_filter = person.strip() if isinstance(person, str) and person.strip() else None
+
+    query_start = eff_start if eff_start is not None else "0001-01-01"
+    query_end = eff_end if eff_end is not None else "9999-12-31"
+    candidates = expenses_in(store, query_start, query_end)
+
+    results = []
+    for e in candidates:
+        if e.get("deleted"):
+            continue
+
+        if person_filter is not None:
+            members = e.get("members") or []
+            if e.get("payer") != person_filter and person_filter not in members:
+                continue
+
+        amt = money.to_won(e.get("amount", 0))
+        if min_won is not None and amt < min_won:
+            continue
+        if max_won is not None and amt > max_won:
+            continue
+
+        if keyword is not None:
+            memo = e.get("memo") or ""
+            if keyword not in memo:
+                continue
+
+        results.append(e)
+
+    return results
