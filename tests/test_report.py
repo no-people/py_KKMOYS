@@ -693,5 +693,61 @@ class TestReportTables(unittest.TestCase):
         self.assertIn("[2026-11 월간 보고서]", lines[0])
         self.assertIn("21,000", lines[0])
 
+
+class TestWeekdayAndWeekTotals(unittest.TestCase):
+    def _make_store(self):
+        return SimpleNamespace(
+            data={
+                "expenses": [
+                    # 2026-11-02(월), 2026-11-04(수), 2026-11-08(일) -> 같은 주(월요일 2026-11-02)
+                    {"id": 1, "date": "2026-11-02", "payer": "이서연", "amount": 5000, "members": ["이서연"]},
+                    {"id": 2, "date": "2026-11-04", "payer": "김민수", "amount": 7000, "members": ["김민수"]},
+                    {"id": 3, "date": "2026-11-08", "payer": "김민수", "amount": 3000, "members": ["김민수"]},
+                    # 2026-11-16(월) -> 2026-11-09 주는 0원, 2026-11-16 주는 10000원
+                    {"id": 4, "date": "2026-11-16", "payer": "이서연", "amount": 10000, "members": ["이서연"]},
+                    # 삭제 표시 지출 제외
+                    {"id": 5, "date": "2026-11-03", "payer": "박지훈", "amount": 99000, "members": ["박지훈"], "deleted": True},
+                ]
+            }
+        )
+
+    def test_weekday_totals_and_command(self):
+        res = report_feature.weekday_totals(self._make_store(), "2026-11-01", "2026-11-30")
+        self.assertEqual(res, {"월": 15000, "화": 0, "수": 7000, "목": 0, "금": 0, "토": 0, "일": 3000})
+
+        lines = []
+        changed = report_cmd.run(
+            "weekday",
+            SimpleNamespace(month="2026-11", start=None, end=None),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertIn("합계", lines[0])
+        self.assertIn("25,000", lines[0])
+
+    def test_week_totals_monday_start_and_command(self):
+        # 2026-11-02(월) ~ 2026-11-18(수): 11-02, 11-09(0원), 11-16 세 주
+        res = report_feature.week_totals(self._make_store(), "2026-11-02", "2026-11-18")
+        self.assertEqual(res, {"2026-11-02": 15000, "2026-11-09": 0, "2026-11-16": 10000})
+
+        lines = []
+        changed = report_cmd.run(
+            "week",
+            SimpleNamespace(month=None, start="2026-11-02", end="2026-11-18"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertIn("2026-11-09", lines[0])
+        self.assertIn("25,000", lines[0])
+
+    def test_reversed_period_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.week_totals(self._make_store(), "2026-11-20", "2026-11-01")
+
+
 if __name__ == "__main__":
     unittest.main()
