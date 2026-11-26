@@ -50,10 +50,6 @@ def run(c, args, cfg, store, out):
         return False
 
     if c == "search":
-        if getattr(args, "month", None) or getattr(args, "start", None) or getattr(args, "end", None):
-            start, end = _period(args)
-        else:
-            start, end = None, None
         start = getattr(args, "start", None)
         end = getattr(args, "end", None)
         month = getattr(args, "month", None)
@@ -111,7 +107,7 @@ def run(c, args, cfg, store, out):
 
     if c == "monthly":
         out(report_feat.monthly_table(store, args.first, args.last))
-        return False 
+        return False
 
     if c == "month":
         out(report_feat.month_report(store, args.month).rstrip("\n"))
