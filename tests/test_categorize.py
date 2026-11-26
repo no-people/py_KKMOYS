@@ -275,6 +275,63 @@ class ApplyRulesTest(StoreCase):
                          (3, "edit", "교통", "식비"))
 
 
+class SetCategoryTest(StoreCase):
+    """set_category·unfix_category — 직접 지정하면 고정, 다시 분류해도 그대로. 고정을 풀면 규칙을 따름."""
+
+    def setUp(self):
+        super().setUp()
+        self.rules = []
+        categorize.add_rule(self.rules, "식비", ["저녁"])
+        self.store.data["expenses"].append(_expense(1, "회의 후 저녁"))
+
+    def test_set_fixes_and_apply_keeps(self):
+        # 앞뒤 공백은 떼고 고정, 그 뒤 다시 분류해도 바뀌지 않는다
+        e = categorize.set_category(self.store, 1, " 장소 ")
+        self.assertEqual((e["category"], e["category_fixed"]), ("장소", True))
+        self.assertEqual(categorize.apply_rules(self.store, self.rules), [])
+        self.assertEqual(self.store.data["expenses"][0]["category"], "장소")
+
+    def test_unfix_then_apply_follows_rule(self):
+        categorize.set_category(self.store, 1, "장소")
+        e = categorize.unfix_category(self.store, 1)
+        self.assertEqual((e["category"], e["category_fixed"]), ("장소", False))   # 분류 이름은 그대로
+        self.assertEqual(categorize.apply_rules(self.store, self.rules), [(1, "장소", "식비")])
+
+    def test_history_recorded(self):
+        categorize.set_category(self.store, 1, "장소")
+        categorize.unfix_category(self.store, 1)
+        got = [(h["id"], h["action"], h["before"].get("category_fixed"), h["after"]["category_fixed"])
+               for h in self.store.data["history"]]
+        self.assertEqual(got, [(1, "edit", None, True), (1, "edit", True, False)])
+
+    def test_bad_input_raises_and_changes_nothing(self):
+        self.store.data["locks"].append({"start": "2026-10-01", "end": "2026-10-31"})
+        self.store.data["expenses"] += [_expense(2, "", deleted=True), _expense(3, "", date="2026-10-31")]
+        for eid, category in [(1, ""), (1, "  "), (1, None), (9, "장소"), (2, "장소"), (3, "장소")]:
+            with self.subTest(eid=eid, category=category):
+                with self.assertRaises(ValueError):
+                    categorize.set_category(self.store, eid, category)
+        self.assertEqual([e.get("category_fixed") for e in self.store.data["expenses"]], [None, None, None])
+        self.assertEqual(self.store.data["history"], [])
+
+    def test_unfix_not_fixed_raises(self):
+        # 고정되지 않은 지출(키가 없는 옛 지출 포함)은 풀 것이 없다
+        with self.assertRaises(ValueError):
+            categorize.unfix_category(self.store, 1)
+
+    def test_unfix_bad_input_raises_and_changes_nothing(self):
+        # 없는 번호·삭제 표시·확정 기간은 unfix_category 도 거부(set_category 와 같은 검사)
+        self.store.data["locks"].append({"start": "2026-10-01", "end": "2026-10-31"})
+        self.store.data["expenses"] += [_expense(2, "", "장소", deleted=True, category_fixed=True),
+                                        _expense(3, "", "장소", date="2026-10-31", category_fixed=True)]
+        for eid in (9, 2, 3):
+            with self.subTest(eid=eid):
+                with self.assertRaises(ValueError):
+                    categorize.unfix_category(self.store, eid)
+        self.assertEqual([e["category_fixed"] for e in self.store.data["expenses"][1:]], [True, True])
+        self.assertEqual(self.store.data["history"], [])
+
+
 class UncategorizedTest(StoreCase):
     """uncategorized — category_of 가 "미분류"인 지출, 삭제 표시 제외, 날짜·번호 순."""
 

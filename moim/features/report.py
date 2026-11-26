@@ -203,6 +203,11 @@ def _normalize_amount(raw, label):
 
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
+    if person is not None and not isinstance(person, str):
+        raise ValueError(f"사람 이름은 문자열이어야 합니다: {person!r}")
+    if word is not None and not isinstance(word, str):
+        raise ValueError(f"낱말은 문자열이어야 합니다: {word!r}")
+
     eff_start = start.strip() or None if isinstance(start, str) else start
     eff_end = end.strip() or None if isinstance(end, str) else end
 
@@ -219,11 +224,11 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
     if min_won is not None and max_won is not None and min_won > max_won:
         raise ValueError("최소 금액이 최대 금액보다 클 수 없습니다.")
 
-    keyword = word.strip() if isinstance(word, str) else word
-    if isinstance(keyword, str) and keyword == "":
+    keyword = word.strip() if word is not None else None
+    if keyword == "":
         keyword = None
 
-    person_filter = person.strip() if isinstance(person, str) and person.strip() else None
+    person_filter = person.strip() if person is not None and person.strip() else None
 
     query_start = eff_start if eff_start is not None else "0001-01-01"
     query_end = eff_end if eff_end is not None else "9999-12-31"

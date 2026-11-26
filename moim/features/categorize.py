@@ -123,13 +123,37 @@ def apply_rules(store, rules, preview=False):
     return changes
 
 
+def _editable_expense(store, eid):
+    """분류를 바꿀 수 있는 지출. 없는 번호·삭제 표시·확정 기간이면 ValueError."""
+    e = store.get_expense(eid)   # 없는 번호면 "N번 지출이 없습니다"
+    if e.get("deleted", False):   # 삭제 표시된 지출은 고치지 않는다(규약 6-1)
+        raise ValueError(f"삭제된 지출입니다: {e['id']}번")
+    if is_locked(store, e["date"]):   # 확정 기간의 지출은 수정 불가(규약 6)
+        raise ValueError(f"정산이 확정된 기간입니다: {e['date']}")
+    return e
+
+
 def set_category(store, eid, category):
     """분류를 직접 정한다. 다시 분류해도 바뀌지 않게 고정한다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    # category_fixed 를 True 로 만드는 곳은 여기뿐이다(규격 0장, #39 합의)
+    if not isinstance(category, str) or not category.strip():
+        raise ValueError("분류 이름을 입력하세요")
+    e = _editable_expense(store, eid)
+    after = dict(e, category=category.strip(), category_fixed=True)   # 앞뒤 공백은 add_rule 처럼 뗀다
+    store.record("edit", e["id"], e, after)   # 이력을 먼저 남긴다: 실패하면 지출도 그대로
+    e.update(after)
+    return e
 
 
 def unfix_category(store, eid):
-    raise NotImplementedError("이 함수를 구현한다")
+    """고정을 푼다. 분류 이름은 그대로 두고, 다음 다시 분류 때부터 규칙을 따른다."""
+    e = _editable_expense(store, eid)
+    if not e.get("category_fixed", False):   # 키가 없는 옛 지출도 고정 안 됨으로 본다
+        raise ValueError(f"고정되지 않은 지출입니다: {e['id']}번")
+    after = dict(e, category_fixed=False)
+    store.record("edit", e["id"], e, after)
+    e.update(after)
+    return e
 
 
 def uncategorized(store):
