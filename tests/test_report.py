@@ -384,6 +384,124 @@ class TestTextfmtBarChart(unittest.TestCase):
             textfmt.bar_chart({}, bar_width=0)
 
 
+class TestSearch(unittest.TestCase):
+    def setUp(self):
+        self.store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 2, "date": "2026-11-10", "payer": "김민수", "amount": 15000, "members": ["김민수", "이서연"], "memo": "회의 후 저녁", "deleted": False},
+                    {"id": 1, "date": "2026-11-10", "payer": "이서연", "amount": 5000, "members": ["이서연", "박지훈"], "memo": "회의 커피", "deleted": False},
+                    {"id": 3, "date": "2026-11-01", "payer": "박지훈", "amount": 30000, "members": ["박지훈"], "memo": "장소 대여", "deleted": False},
+                    {"id": 4, "date": "2026-11-30", "payer": "김민수", "amount": 8000, "members": ["김민수", "박지훈"], "memo": "간식", "deleted": False},
+                    {"id": 5, "date": "2026-11-15", "payer": "김민수", "amount": 12000, "members": ["김민수"], "memo": "회의 삭제건", "deleted": True},
+                ]
+            }
+        )
+
+    def test_no_filters_excludes_deleted_and_sorts_by_date_then_id(self):
+        res = report_feature.search(self.store)
+        self.assertEqual([e["id"] for e in res], [3, 1, 2, 4])
+
+    def test_period_boundaries_inclusive(self):
+        res = report_feature.search(self.store, start="2026-11-01", end="2026-11-10")
+        self.assertEqual([e["id"] for e in res], [3, 1, 2])
+
+    def test_start_only_without_end(self):
+        res = report_feature.search(self.store, start="2026-11-10")
+        self.assertEqual([e["id"] for e in res], [1, 2, 4])
+
+    def test_person_matches_payer_or_member(self):
+        # 이서연은 1번(payer), 2번(member) 모두에 해당
+        res = report_feature.search(self.store, person="이서연")
+        self.assertEqual([e["id"] for e in res], [1, 2])
+
+    def test_amount_range_and_word_combined(self):
+        res = report_feature.search(self.store, min_amount="5,000원", max_amount=20000, word="회의")
+        self.assertEqual([e["id"] for e in res], [1, 2])
+
+    def test_invalid_ranges_raise_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, start="2026-11-20", end="2026-11-10")
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, min_amount=20000, max_amount=10000)
+
+    def test_period_with_date_objects(self):
+        res = report_feature.search(self.store, start=date(2026, 11, 10), end=date(2026, 11, 10))
+        self.assertEqual([e["id"] for e in res], [1, 2])
+
+    def test_report_search_command_month_empty_and_total(self):
+        empty_lines = []
+        changed_empty = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start=None,
+                end=None,
+                month="2025-01",
+                person=None,
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            empty_lines.append,
+        )
+        self.assertFalse(changed_empty)
+        self.assertEqual(empty_lines, ["검색 결과가 없습니다."])
+
+        lines = []
+        changed = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start=None,
+                end=None,
+                month="2026-11",
+                person="이서연",
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("이서연", lines[0])
+        self.assertIn("20,000", lines[0])
+        self.assertIn("2 건", lines[0])
+
+    def test_empty_or_whitespace_amount_and_word_are_ignored(self):
+        res_amt = report_feature.search(self.store, min_amount="", max_amount="   ")
+        self.assertEqual([e["id"] for e in res_amt], [3, 1, 2, 4])
+
+        res_word = report_feature.search(self.store, word="   ")
+        self.assertEqual([e["id"] for e in res_word], [3, 1, 2, 4])
+
+    def test_invalid_amount_string_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, min_amount="abc")
+
+    def test_command_search_invalid_range_raises_value_error(self):
+        lines = []
+        with self.assertRaises(ValueError):
+            report_cmd.run(
+                "search",
+                SimpleNamespace(
+                    start="2026-11-20",
+                    end="2026-11-10",
+                    month=None,
+                    person=None,
+                    min_amount=None,
+                    max_amount=None,
+                    word=None,
+                ),
+                {},
+                self.store,
+                lines.append,
+            )
+
+
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):
         return SimpleNamespace(data={"expenses": expenses})
