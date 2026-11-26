@@ -501,6 +501,20 @@ class TestSearch(unittest.TestCase):
                 lines.append,
             )
 
+    def test_non_string_person_or_word_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, person=5)
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, word=5)
+
+    def test_none_and_empty_string_person_or_word_are_ignored(self):
+        expected_ids = [3, 1, 2, 4]
+        res_none = report_feature.search(self.store, person=None, word=None)
+        self.assertEqual([e["id"] for e in res_none], expected_ids)
+
+        res_empty = report_feature.search(self.store, person="", word="")
+        self.assertEqual([e["id"] for e in res_empty], expected_ids)
+
 
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):
