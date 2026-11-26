@@ -213,11 +213,6 @@ def _normalize_amount(raw, label):
 
 def search(store, start=None, end=None, person=None, min_amount=None, max_amount=None, word=None):
     """지출 검색. 기간, 사람(낸 사람이거나 참여자), 금액 범위, 메모 낱말로 찾는다. 삭제된 지출은 빼고 날짜순."""
-    if person is not None and not isinstance(person, str):
-        raise ValueError(f"사람 이름은 문자열이어야 합니다: {person!r}")
-    if word is not None and not isinstance(word, str):
-        raise ValueError(f"낱말은 문자열이어야 합니다: {word!r}")
-
     eff_start = start.strip() or None if isinstance(start, str) else start
     eff_end = end.strip() or None if isinstance(end, str) else end
 
