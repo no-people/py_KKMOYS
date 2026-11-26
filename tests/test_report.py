@@ -502,18 +502,32 @@ class TestSearch(unittest.TestCase):
             )
 
     def test_exact_amount_and_same_start_end_date(self):
-      # 최소 금액 == 최대 금액, 시작일 == 종료일 경계 검증
-      res_amt = report_feature.search(self.store, min_amount=15000, max_amount=15000)
-      self.assertEqual([e["id"] for e in res_amt], [2])
+        # 최소 금액 == 최대 금액, 시작일 == 종료일 경계 검증
+        res_amt = report_feature.search(self.store, min_amount=15000, max_amount=15000)
+        self.assertEqual([e["id"] for e in res_amt], [2])
 
-      res_day = report_feature.search(self.store, start="2026-11-01", end="2026-11-01")
-      self.assertEqual([e["id"] for e in res_day], [3])
+        res_day = report_feature.search(self.store, start="2026-11-01", end="2026-11-01")
+        self.assertEqual([e["id"] for e in res_day], [3])
 
     def test_invalid_special_amount_raises_value_error(self):
         for value in ("Infinity", "-Infinity", "NaN"):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     report_feature.search(self.store, min_amount=value)
+
+    def test_non_string_person_or_word_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, person=5)
+        with self.assertRaises(ValueError):
+            report_feature.search(self.store, word=5)
+
+    def test_none_and_empty_string_person_or_word_are_ignored(self):
+        expected_ids = [3, 1, 2, 4]
+        res_none = report_feature.search(self.store, person=None, word=None)
+        self.assertEqual([e["id"] for e in res_none], expected_ids)
+
+        res_empty = report_feature.search(self.store, person="", word="")
+        self.assertEqual([e["id"] for e in res_empty], expected_ids)
 
     def test_report_search_command_single_bound_start_or_end(self):
         start_only_lines = []
@@ -727,6 +741,7 @@ class TestReportTables(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("[2026-11 월간 보고서]", lines[0])
         self.assertIn("21,000", lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()
