@@ -30,6 +30,8 @@ def _to_ym_tuple(ym):
             raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
         if not (isinstance(year, int) and isinstance(month, int)):
             raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
+        if year < 1:
+            raise ValueError("연도는 1 이상이어야 합니다.")
         if not (1 <= month <= 12):
             raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
         return (year, month)
@@ -44,6 +46,8 @@ def _to_ym_tuple(ym):
             raise ValueError(f"유효하지 않은 연월 문자열입니다: {ym!r}") from exc
         if year < 1:
             raise ValueError("연도는 1 이상이어야 합니다.")
+        if not (1 <= month <= 12):
+            raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
         return (year, month)
     raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
 
@@ -93,6 +97,7 @@ def monthly_totals(store, start_month, end_month):
         start_d, end_d = _month_bounds(ym)
         result[_format_ym(ym)] = period_total(store, start_d, end_d)
     return result
+
 
 def period_summary(store, start, end):
     total = period_total(store, start, end)

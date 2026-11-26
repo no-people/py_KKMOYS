@@ -99,7 +99,7 @@ def run(c, args, cfg, store, out):
 
     if c == "monthly":
         out(report_feat.monthly_table(store, args.first, args.last))
-        return False 
+        return False
 
     if c == "month":
         out(report_feat.month_report(store, args.month).rstrip("\n"))
