@@ -579,5 +579,119 @@ class TestMonthOverMonth(unittest.TestCase):
         self.assertEqual(lines[4], "증감률: 지난달 지출이 0원이어서 계산할 수 없습니다.")
 
 
+class TestReportTables(unittest.TestCase):
+    def _make_store(self):
+        return SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-11-12", "payer": "이서연", "amount": 6000, "members": ["이서연"], "category": "식비"},
+                    {"id": 2, "date": "2026-11-13", "payer": "김민수", "amount": 9000, "members": ["김민수"], "category": "교통"},
+                    {"id": 3, "date": "2026-11-14", "payer": "김민수", "amount": 2000, "members": ["김민수"], "category": None},
+                    {"id": 4, "date": "2026-11-15", "payer": "이서연", "amount": 4000, "members": ["이서연"], "category": "식비"},
+                    {"id": 5, "date": "2026-10-15", "payer": "김민수", "amount": 3000, "members": ["김민수"], "category": "교통"},
+                    {"id": 6, "date": "2026-11-20", "payer": "박지훈", "amount": 50000, "members": ["박지훈"], "category": "식비", "deleted": True},
+                ]
+            }
+        )
+
+    def _bars(self, out):
+        return {line.split()[0]: line.count("#") for line in out.split("\n\n")[1].splitlines()}
+
+    def test_category_table_order_total_and_bars(self):
+        out = report_feature.category_table(self._make_store(), "2026-11-01", "2026-11-30")
+        expected = "\n".join([
+            "분류    건수  금액",
+            "------  ----  ------",
+            "식비       2  10,000",
+            "교통       1   9,000",
+            "미분류     1   2,000",
+            "------  ----  ------",
+            "합계       4  21,000",
+            "",
+            "식비    ##############################  10,000",
+            "교통    ###########################      9,000",
+            "미분류  ######                           2,000",
+        ])
+        self.assertEqual(out, expected)
+
+    def test_monthly_table_total_and_bars(self):
+        out = report_feature.monthly_table(self._make_store(), (2026, 10), (2026, 12))
+        self.assertIn("24,000", out.split("\n\n")[0])
+        b = self._bars(out)
+        self.assertEqual((b["2026-10"], b["2026-11"], b["2026-12"]), (4, 30, 0))
+
+    def test_monthly_table_all_zero_period(self):
+        # 지출이 전혀 없는 기간(2025-01 ~ 2025-03): 모든 월 0원, 합계 0원, 막대 없이 그래프 출력
+        out = report_feature.monthly_table(self._make_store(), "2025-01", "2025-03")
+        table_part, chart_part = out.split("\n\n")
+        for ym in ("2025-01", "2025-02", "2025-03"):
+            self.assertIn(ym, table_part)
+            self.assertIn(ym, chart_part)
+        self.assertIn("합계", table_part)
+        self.assertNotIn("#", chart_part)
+        # 표의 데이터·합계 줄이 모두 0원인지 확인
+        data_lines = [line for line in table_part.splitlines() if line.startswith(("2025-", "합계"))]
+        self.assertEqual(len(data_lines), 4)
+        for line in data_lines:
+            self.assertTrue(line.endswith("  0"))
+
+    def test_month_report_uses_tables(self):
+        out = report_feature.month_report(self._make_store(), "2026-11")
+        self.assertIn("[분류별 지출]", out)
+        self.assertIn("합계", out)
+        self.assertIn("#" * 30, out)
+        self.assertIn("[인원별 지출]", out)
+
+    def test_report_category_command_and_missing_period(self):
+        lines = []
+        changed = report_cmd.run(
+            "category",
+            SimpleNamespace(month="2026-11", start=None, end=None),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("식비", lines[0])
+        self.assertIn("21,000", lines[0])
+
+        with self.assertRaises(ValueError):
+            report_cmd.run(
+                "category",
+                SimpleNamespace(month=None, start="2026-11-30", end="2026-11-01"),
+                {},
+                self._make_store(),
+                lines.append,
+            )
+
+    def test_report_monthly_command(self):
+        lines = []
+        changed = report_cmd.run(
+            "monthly",
+            SimpleNamespace(first="2026-10", last="2026-12"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("2026-11", lines[0])
+        self.assertIn("24,000", lines[0])
+
+    def test_report_month_command(self):
+        lines = []
+        changed = report_cmd.run(
+            "month",
+            SimpleNamespace(month="2026-11"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("[2026-11 월간 보고서]", lines[0])
+        self.assertIn("21,000", lines[0])
+
 if __name__ == "__main__":
     unittest.main()

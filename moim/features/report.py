@@ -15,8 +15,10 @@ from decimal import Decimal, ROUND_HALF_UP
 from ..common import dates, money
 from ..common.textfmt import bar_chart, pad, table, width  # noqa: F401  (보고서 기능의 표 출력은 공통 함수로 제공)
 from ..common.queries import category_totals, expenses_in, period_total, person_paid
+from ..common.rules import UNCATEGORIZED
 
 WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
+BAR_WIDTH = 30
 
 
 def _to_ym_tuple(ym):
@@ -28,6 +30,8 @@ def _to_ym_tuple(ym):
             raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
         if not (isinstance(year, int) and isinstance(month, int)):
             raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
+        if year < 1:
+            raise ValueError("연도는 1 이상이어야 합니다.")
         if not (1 <= month <= 12):
             raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
         return (year, month)
@@ -40,6 +44,8 @@ def _to_ym_tuple(ym):
             month = int(parts[1])
         except ValueError as exc:
             raise ValueError(f"유효하지 않은 연월 문자열입니다: {ym!r}") from exc
+        if year < 1:
+            raise ValueError("연도는 1 이상이어야 합니다.")
         if not (1 <= month <= 12):
             raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
         return (year, month)
@@ -94,7 +100,6 @@ def monthly_totals(store, start_month, end_month):
 
 
 def period_summary(store, start, end):
-    expenses_in(store, start, end)
     total = period_total(store, start, end)
     by_category = _category_amount_map(store, start, end)
     by_person = person_paid(store, start, end)
@@ -140,36 +145,45 @@ def biggest_day(store, start, end):
     raise NotImplementedError("이 함수를 구현한다")
 
 
+def category_table(store, start, end):
+    """기간의 분류별 건수·금액 표와 금액 막대그래프. 금액 큰 순, 미분류는 맨 뒤."""
+    totals = category_totals(store, start, end) or {}
+    if not totals:
+        return "내역 없음"
+    order = sorted(totals, key=lambda c: (c == UNCATEGORIZED, -money.to_won(totals[c]["amount"]), c))
+    rows = [[c, totals[c]["count"], money.to_won(totals[c]["amount"])] for c in order]
+    count_sum = sum(r[1] for r in rows)
+    amount_sum = sum(r[2] for r in rows)
+    if amount_sum != period_total(store, start, end):   # 분류 합계 = 기간 합계 (합계 불일치 방지)
+        raise ValueError("분류별 합계가 기간 합계와 다릅니다")
+    body = table(["분류", "건수", "금액"], rows, total=["합계", count_sum, amount_sum], numeric={1, 2})
+    chart = bar_chart({r[0]: r[2] for r in rows}, bar_width=BAR_WIDTH)
+    return f"{body}\n\n{chart}"
+
+
+def monthly_table(store, start_month, end_month):
+    """달별 지출 합계 표와 막대그래프. 지출이 없는 달은 0원으로 나온다."""
+    amounts = monthly_totals(store, start_month, end_month)   # {'YYYY-MM': 합계}
+    rows = [[k, v] for k, v in amounts.items()]
+    body = table(["월", "지출 합계"], rows, total=["합계", sum(amounts.values())], numeric={1})
+    chart = bar_chart(amounts, bar_width=BAR_WIDTH)
+    return f"{body}\n\n{chart}"
+
+
 def month_report(store, month):
+    """월간 보고서: 총 지출, 분류별 표·그래프, 인원별 낸 돈 표."""
     ym = _to_ym_tuple(month)
     start_d, end_d = _month_bounds(ym)
-    ym_label = _format_ym(ym)
     total = period_total(store, start_d, end_d)
-    by_category = _category_amount_map(store, start_d, end_d)
     by_person = person_paid(store, start_d, end_d)
 
-    lines = [
-        f"[{ym_label} 월간 보고서]",
-        f"총 지출: {money.fmt(total)}",
-    ]
-
-    if by_category:
-        cat_rows = [[k, money.fmt(v)] for k, v in by_category.items()]
-        lines.append("[분류별 지출]")
-        lines.append(table(["분류", "금액"], cat_rows))
-        lines.append(bar_chart(by_category))
-    else:
-        lines.append("[분류별 지출]")
-        lines.append("내역 없음")
-
+    lines = [f"[{_format_ym(ym)} 월간 보고서]", f"총 지출: {money.fmt(total)}", "", "[분류별 지출]",
+             category_table(store, start_d, end_d), "", "[인원별 지출]"]
     if by_person:
-        person_rows = [[k, money.fmt(v)] for k, v in by_person.items()]
-        lines.append("[인원별 지출]")
-        lines.append(table(["인원", "금액"], person_rows))
+        rows = [[k, v] for k, v in by_person.items()]
+        lines.append(table(["인원", "낸 돈"], rows, total=["합계", sum(by_person.values())], numeric={1}))
     else:
-        lines.append("[인원별 지출]")
         lines.append("내역 없음")
-
     return "\n".join(lines) + "\n"
 
 
