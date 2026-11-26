@@ -275,7 +275,6 @@ class ApplyRulesTest(StoreCase):
                          (3, "edit", "교통", "식비"))
 
 
-
 class SetCategoryTest(StoreCase):
     """set_category·unfix_category — 직접 지정하면 고정, 다시 분류해도 그대로. 고정을 풀면 규칙을 따름."""
 
@@ -319,6 +318,18 @@ class SetCategoryTest(StoreCase):
         # 고정되지 않은 지출(키가 없는 옛 지출 포함)은 풀 것이 없다
         with self.assertRaises(ValueError):
             categorize.unfix_category(self.store, 1)
+
+    def test_unfix_bad_input_raises_and_changes_nothing(self):
+        # 없는 번호·삭제 표시·확정 기간은 unfix_category 도 거부(set_category 와 같은 검사)
+        self.store.data["locks"].append({"start": "2026-10-01", "end": "2026-10-31"})
+        self.store.data["expenses"] += [_expense(2, "", "장소", deleted=True, category_fixed=True),
+                                        _expense(3, "", "장소", date="2026-10-31", category_fixed=True)]
+        for eid in (9, 2, 3):
+            with self.subTest(eid=eid):
+                with self.assertRaises(ValueError):
+                    categorize.unfix_category(self.store, eid)
+        self.assertEqual([e["category_fixed"] for e in self.store.data["expenses"][1:]], [True, True])
+        self.assertEqual(self.store.data["history"], [])
 
 
 class UncategorizedTest(StoreCase):
