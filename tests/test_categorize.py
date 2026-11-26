@@ -396,3 +396,38 @@ class CatCommandTest(StoreCase):
     def test_uncat(self):
         self.assertEqual(self.cat("uncat"), ["1번  2026-11-12  9,000원  김민수  회의 후 저녁",
                                              "2번  2026-11-12  36,000원  김민수  현수막", "미분류 2건"])
+
+
+class SummaryTest(StoreCase):
+    """summary — 분류별 건수·금액. 공통 모듈 category_totals 결과를 그대로 쓴다."""
+
+    def setUp(self):
+        super().setUp()
+        self.store.data["expenses"] += [
+            _expense(1, "", "식비", 6000, date="2026-11-01"),     # 시작일 당일
+            _expense(2, "", " 식비 ", 4000, date="2026-11-30"),   # 끝일 당일, 앞뒤 공백은 "식비"
+            _expense(3, "", "교통", 9000, date="2026-11-13", category_fixed=True),
+            _expense(4, "", None, 2000, date="2026-11-14"),
+            _expense(5, "", "식비", 50000, date="2026-11-15", deleted=True),
+            _expense(6, "", "식비", 1000, date="2026-10-31"),     # 기간 밖
+            _expense(7, "", "교통", 1000, date="2026-12-01")]     # 기간 밖
+
+    def test_counts_and_amounts(self):
+        self.assertEqual(categorize.summary(self.store, "2026-11-01", "2026-11-30"),
+                         {"식비": {"count": 2, "amount": 10000},
+                          "교통": {"count": 1, "amount": 9000},
+                          UNCATEGORIZED: {"count": 1, "amount": 2000}})
+
+    def test_same_as_common_function_and_period_total(self):
+        # 보고서·예산과 같은 공통 함수 결과이고, 금액 합은 기간 합계와 같다
+        result = categorize.summary(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(result, queries.category_totals(self.store, "2026-11-01", "2026-11-30"))
+        self.assertEqual(sum(v["amount"] for v in result.values()),
+                         queries.period_total(self.store, "2026-11-01", "2026-11-30"))
+
+    def test_no_expenses_is_empty(self):
+        self.assertEqual(categorize.summary(self.store, "2026-01-01", "2026-01-31"), {})
+
+    def test_bad_date_raises(self):
+        with self.assertRaises(ValueError):
+            categorize.summary(self.store, "2026-13-01", "2026-11-30")
