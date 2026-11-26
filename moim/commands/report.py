@@ -54,6 +54,17 @@ def run(c, args, cfg, store, out):
             start, end = _period(args)
         else:
             start, end = None, None
+        start = getattr(args, "start", None)
+        end = getattr(args, "end", None)
+        month = getattr(args, "month", None)
+        if month:
+            start, end = dates.month_range(*dates.parse_month(month))
+        elif start is not None and end is not None:
+            start, end = dates.parse(start).isoformat(), dates.parse(end).isoformat()
+        elif start is not None:
+            start = dates.parse(start).isoformat()
+        elif end is not None:
+            end = dates.parse(end).isoformat()
 
         rows_data = report_feat.search(
             store,

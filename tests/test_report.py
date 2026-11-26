@@ -515,6 +515,47 @@ class TestSearch(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     report_feature.search(self.store, min_amount=value)
 
+    def test_report_search_command_single_bound_start_or_end(self):
+        start_only_lines = []
+        changed_start = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start="2026-11-10",
+                end=None,
+                month=None,
+                person=None,
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            start_only_lines.append,
+        )
+        self.assertFalse(changed_start)
+        self.assertEqual(len(start_only_lines), 1)
+        self.assertIn("3 건", start_only_lines[0])
+
+        end_only_lines = []
+        changed_end = report_cmd.run(
+            "search",
+            SimpleNamespace(
+                start=None,
+                end="2026-11-10",
+                month=None,
+                person=None,
+                min_amount=None,
+                max_amount=None,
+                word=None,
+            ),
+            {},
+            self.store,
+            end_only_lines.append,
+        )
+        self.assertFalse(changed_end)
+        self.assertEqual(len(end_only_lines), 1)
+        self.assertIn("3 건", end_only_lines[0])
+
 
 class TestMonthOverMonth(unittest.TestCase):
     def _make_store(self, expenses):
