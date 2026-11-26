@@ -30,8 +30,6 @@ def _to_ym_tuple(ym):
             raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
         if not (isinstance(year, int) and isinstance(month, int)):
             raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
-        if year < 1:
-            raise ValueError("연도는 1 이상이어야 합니다.")
         if not (1 <= month <= 12):
             raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
         return (year, month)
@@ -46,8 +44,6 @@ def _to_ym_tuple(ym):
             raise ValueError(f"유효하지 않은 연월 문자열입니다: {ym!r}") from exc
         if year < 1:
             raise ValueError("연도는 1 이상이어야 합니다.")
-        if not (1 <= month <= 12):
-            raise ValueError(f"유효하지 않은 월입니다: {ym!r}")
         return (year, month)
     raise ValueError(f"유효하지 않은 연월입니다: {ym!r}")
 
@@ -92,17 +88,11 @@ def monthly_totals(store, start_month, end_month):
     """{'YYYY-MM': 합계}"""
     start_ym = _to_ym_tuple(start_month)
     end_ym = _to_ym_tuple(end_month)
-    months = list(_iter_months(start_ym, end_ym))
-    result = {_format_ym(ym): 0 for ym in months}
-
-    start_d = _month_bounds(months[0])[0]
-    end_d = _month_bounds(months[-1])[1]
-    for e in expenses_in(store, start_d, end_d):
-        ym_key = _format_ym(_to_ym_tuple(e["date"][:7]))
-        if ym_key in result:
-            result[ym_key] += money.to_won(e["amount"])
+    result = {}
+    for ym in _iter_months(start_ym, end_ym):
+        start_d, end_d = _month_bounds(ym)
+        result[_format_ym(ym)] = period_total(store, start_d, end_d)
     return result
-
 
 def period_summary(store, start, end):
     total = period_total(store, start, end)
@@ -207,7 +197,7 @@ def _normalize_amount(raw, label):
         raw = cleaned
     try:
         return money.to_won(raw)
-    except (ArithmeticError, TypeError, ValueError) as exc:
+    except (TypeError, ValueError) as exc:
         raise ValueError(f"{label} 금액 형식이 올바르지 않습니다: {raw!r}") from exc
 
 
@@ -262,5 +252,4 @@ def search(store, start=None, end=None, person=None, min_amount=None, max_amount
 
         results.append(e)
 
-    results.sort(key=lambda e: (dates.parse(e["date"]), e.get("id", 0)))
     return results

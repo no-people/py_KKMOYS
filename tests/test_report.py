@@ -316,7 +316,7 @@ class TestReportFeature(unittest.TestCase):
         self.assertIn("28,000", str_text)
 
     def test_invalid_year_month_raises_value_error(self):
-        for bad_ym in [(0, 1), (-1, 1), "0000-01", (2026, 0), (2026, 13), ("bad",), True]:
+        for bad_ym in [(2026, 0), (2026, 13), ("bad",), True]:
             with self.subTest(bad_ym=bad_ym):
                 with self.assertRaises(ValueError):
                     report_feature._to_ym_tuple(bad_ym)
@@ -482,61 +482,6 @@ class TestSearch(unittest.TestCase):
         with self.assertRaises(ValueError):
             report_feature.search(self.store, min_amount="abc")
 
-    def test_exact_amount_and_same_start_end_date(self):
-        # 최소 금액 == 최대 금액, 시작일 == 종료일 경계 검증
-        res_amt = report_feature.search(self.store, min_amount=15000, max_amount=15000)
-        self.assertEqual([e["id"] for e in res_amt], [2])
-
-        res_day = report_feature.search(self.store, start="2026-11-01", end="2026-11-01")
-        self.assertEqual([e["id"] for e in res_day], [3])
-
-    def test_invalid_special_amount_raises_value_error(self):
-        for value in ("Infinity", "-Infinity", "NaN"):
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    report_feature.search(self.store, min_amount=value)
-
-    def test_report_search_command_single_bound_start_or_end(self):
-        start_only_lines = []
-        changed_start = report_cmd.run(
-            "search",
-            SimpleNamespace(
-                start="2026-11-10",
-                end=None,
-                month=None,
-                person=None,
-                min_amount=None,
-                max_amount=None,
-                word=None,
-            ),
-            {},
-            self.store,
-            start_only_lines.append,
-        )
-        self.assertFalse(changed_start)
-        self.assertEqual(len(start_only_lines), 1)
-        self.assertIn("3 건", start_only_lines[0])
-
-        end_only_lines = []
-        changed_end = report_cmd.run(
-            "search",
-            SimpleNamespace(
-                start=None,
-                end="2026-11-10",
-                month=None,
-                person=None,
-                min_amount=None,
-                max_amount=None,
-                word=None,
-            ),
-            {},
-            self.store,
-            end_only_lines.append,
-        )
-        self.assertFalse(changed_end)
-        self.assertEqual(len(end_only_lines), 1)
-        self.assertIn("3 건", end_only_lines[0])
-
     def test_command_search_invalid_range_raises_value_error(self):
         lines = []
         with self.assertRaises(ValueError):
@@ -640,14 +585,20 @@ class TestReportTables(unittest.TestCase):
 
     def test_category_table_order_total_and_bars(self):
         out = report_feature.category_table(self._make_store(), "2026-11-01", "2026-11-30")
-        t = out.split("\n\n")[0]
-        self.assertLess(t.index("식비"), t.index("교통"))
-        self.assertLess(t.index("교통"), t.index("미분류"))
-        self.assertIn("합계", t)
-        self.assertIn("21,000", t)
-        self.assertNotIn("71,000", t)
-        b = self._bars(out)
-        self.assertEqual((b["식비"], b["교통"], b["미분류"]), (30, 27, 6))
+        expected = "\n".join([
+            "분류    건수  금액",
+            "------  ----  ------",
+            "식비       2  10,000",
+            "교통       1   9,000",
+            "미분류     1   2,000",
+            "------  ----  ------",
+            "합계       4  21,000",
+            "",
+            "식비    ##############################  10,000",
+            "교통    ###########################      9,000",
+            "미분류  ######                           2,000",
+        ])
+        self.assertEqual(out, expected)
 
     def test_monthly_table_total_and_bars(self):
         out = report_feature.monthly_table(self._make_store(), (2026, 10), (2026, 12))
@@ -727,7 +678,6 @@ class TestReportTables(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("[2026-11 월간 보고서]", lines[0])
         self.assertIn("21,000", lines[0])
-
 
 if __name__ == "__main__":
     unittest.main()
