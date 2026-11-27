@@ -11,6 +11,7 @@
 
 import calendar
 import os
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from ..common import dates, money
 from ..common.textfmt import bar_chart, pad, table, width  # noqa: F401  (보고서 기능의 표 출력은 공통 함수로 제공)
@@ -129,12 +130,64 @@ def month_over_month(store, month):
 
 
 def weekday_totals(store, start, end):
-    raise NotImplementedError("이 함수를 구현한다")
+    """요일별 지출 합계. {'월': 합계, ..., '일': 합계} (지출이 없는 요일도 0원으로 포함)."""
+    start_d = dates.parse(start)
+    end_d = dates.parse(end)
+    if start_d > end_d:
+        raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
+
+    items = expenses_in(store, start_d, end_d)
+    totals = {day: 0 for day in WEEKDAYS}
+    for e in items:
+        d = dates.parse(e["date"])
+        totals[WEEKDAYS[d.weekday()]] += money.to_won(e["amount"])
+    return totals
 
 
 def week_totals(store, start, end):
-    """주(월요일 시작)별 합계. {'YYYY-MM-DD(그 주 월요일)': 합계}"""
-    raise NotImplementedError("이 함수를 구현한다")
+    """주(월요일 시작)별 합계. {'YYYY-MM-DD(그 주 월요일)': 합계}
+
+    첫 주의 시작일 키는 지정 기간 이전의 월요일이 될 수 있으나,
+    합계에는 지정한 [start, end] 기간 안의 지출만 포함된다.
+    """
+    start_d = dates.parse(start)
+    end_d = dates.parse(end)
+    if start_d > end_d:
+        raise ValueError("시작일이 끝일보다 늦을 수 없습니다.")
+
+    items = expenses_in(store, start_d, end_d)
+    first_monday = start_d - timedelta(days=start_d.weekday())
+    last_monday = end_d - timedelta(days=end_d.weekday())
+
+    totals = {}
+    cur = first_monday
+    while cur <= last_monday:
+        totals[cur.isoformat()] = 0
+        cur += timedelta(days=7)
+
+    for e in items:
+        d = dates.parse(e["date"])
+        monday = d - timedelta(days=d.weekday())
+        totals[monday.isoformat()] += money.to_won(e["amount"])
+    return totals
+
+
+def weekday_table(store, start, end):
+    """요일별 지출 합계 표와 막대그래프."""
+    totals = weekday_totals(store, start, end)
+    rows = [[day, totals[day]] for day in WEEKDAYS]
+    body = table(["요일", "지출 합계"], rows, total=["합계", sum(totals.values())], numeric={1})
+    chart = bar_chart(totals, bar_width=BAR_WIDTH)
+    return f"{body}\n\n{chart}"
+
+
+def week_table(store, start, end):
+    """주(월요일 시작)별 지출 합계 표와 막대그래프."""
+    totals = week_totals(store, start, end)
+    rows = [[week_start, amt] for week_start, amt in totals.items()]
+    body = table(["주 시작일(월)", "지출 합계"], rows, total=["합계", sum(totals.values())], numeric={1})
+    chart = bar_chart(totals, bar_width=BAR_WIDTH)
+    return f"{body}\n\n{chart}"
 
 
 def top_expenses(store, start, end, n=5):

@@ -693,5 +693,129 @@ class TestReportTables(unittest.TestCase):
         self.assertIn("[2026-11 월간 보고서]", lines[0])
         self.assertIn("21,000", lines[0])
 
+
+class TestWeekdayAndWeekTotals(unittest.TestCase):
+    def _make_store(self):
+        return SimpleNamespace(
+            data={
+                "expenses": [
+                    # 2026-11-02(월), 2026-11-04(수), 2026-11-08(일) -> 같은 주(월요일 2026-11-02)
+                    {"id": 1, "date": "2026-11-02", "payer": "이서연", "amount": 5000, "members": ["이서연"]},
+                    {"id": 2, "date": "2026-11-04", "payer": "김민수", "amount": 7000, "members": ["김민수"]},
+                    {"id": 3, "date": "2026-11-08", "payer": "김민수", "amount": 3000, "members": ["김민수"]},
+                    # 2026-11-16(월) -> 2026-11-09 주는 0원, 2026-11-16 주는 10000원
+                    {"id": 4, "date": "2026-11-16", "payer": "이서연", "amount": 10000, "members": ["이서연"]},
+                    # 삭제 표시 지출 제외
+                    {"id": 5, "date": "2026-11-03", "payer": "박지훈", "amount": 99000, "members": ["박지훈"], "deleted": True},
+                ]
+            }
+        )
+
+    def test_weekday_totals_and_command(self):
+        res = report_feature.weekday_totals(self._make_store(), "2026-11-01", "2026-11-30")
+        self.assertEqual(res, {"월": 15000, "화": 0, "수": 7000, "목": 0, "금": 0, "토": 0, "일": 3000})
+
+        lines = []
+        changed = report_cmd.run(
+            "weekday",
+            SimpleNamespace(month="2026-11", start=None, end=None),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        expected = "\n".join([
+            "요일  지출 합계",
+            "----  ---------",
+            "월       15,000",
+            "화            0",
+            "수        7,000",
+            "목            0",
+            "금            0",
+            "토            0",
+            "일        3,000",
+            "----  ---------",
+            "합계     25,000",
+            "",
+            "월  ##############################  15,000",
+            "화                                       0",
+            "수  ##############                   7,000",
+            "목                                       0",
+            "금                                       0",
+            "토                                       0",
+            "일  ######                           3,000",
+        ])
+        self.assertEqual(lines, [expected])
+
+    def test_week_totals_monday_start_and_command(self):
+        # 1. 기간이 한 주(2026-11-02 월 ~ 2026-11-08 일) 안에 들어가는 경우
+        single_week = report_feature.week_totals(self._make_store(), "2026-11-02", "2026-11-08")
+        self.assertEqual(single_week, {"2026-11-02": 15000})
+
+        # 2. 기간이 주 중간(수요일)에서 시작·끝나는 경우: 첫 주 키는 기간 이전 월요일, 기간 내 지출만 합산
+        mid_week = report_feature.week_totals(self._make_store(), "2026-11-04", "2026-11-04")
+        self.assertEqual(mid_week, {"2026-11-02": 7000})
+
+        # 3. 2026-11-02(월) ~ 2026-11-18(수): 11-02, 11-09(0원), 11-16 세 주
+        res = report_feature.week_totals(self._make_store(), "2026-11-02", "2026-11-18")
+        self.assertEqual(res, {"2026-11-02": 15000, "2026-11-09": 0, "2026-11-16": 10000})
+
+        lines = []
+        changed = report_cmd.run(
+            "week",
+            SimpleNamespace(month=None, start="2026-11-02", end="2026-11-18"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        expected = "\n".join([
+            "주 시작일(월)  지출 합계",
+            "-------------  ---------",
+            "2026-11-02        15,000",
+            "2026-11-09             0",
+            "2026-11-16        10,000",
+            "-------------  ---------",
+            "합계              25,000",
+            "",
+            "2026-11-02  ##############################  15,000",
+            "2026-11-09                                       0",
+            "2026-11-16  ####################            10,000",
+        ])
+        self.assertEqual(lines, [expected])
+
+    def test_period_boundaries_and_half_up_rounding(self):
+        # 시작일(11-04 수)·끝일(11-06 금) 당일 포함, 전날(11-03 화)·다음 날(11-07 토) 제외
+        # 12,000원(30칸) 대비 1,000원 = 2.5칸 -> 사사오입으로 3칸
+        boundary_store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-11-03", "payer": "이서연", "amount": 50000, "members": ["이서연"]},
+                    {"id": 2, "date": "2026-11-04", "payer": "김민수", "amount": 12000, "members": ["김민수"]},
+                    {"id": 3, "date": "2026-11-06", "payer": "박지훈", "amount": 1000, "members": ["박지훈"]},
+                    {"id": 4, "date": "2026-11-07", "payer": "이서연", "amount": 40000, "members": ["이서연"]},
+                ]
+            }
+        )
+        self.assertEqual(
+            report_feature.weekday_totals(boundary_store, "2026-11-04", "2026-11-06"),
+            {"월": 0, "화": 0, "수": 12000, "목": 0, "금": 1000, "토": 0, "일": 0},
+        )
+        self.assertEqual(
+            report_feature.week_totals(boundary_store, "2026-11-04", "2026-11-06"),
+            {"2026-11-02": 13000},
+        )
+
+        chart_part = report_feature.weekday_table(boundary_store, "2026-11-04", "2026-11-06").split("\n\n")[1]
+        bars = {line.split()[0]: line.count("#") for line in chart_part.splitlines()}
+        self.assertEqual((bars["수"], bars["금"]), (30, 3))
+
+    def test_reversed_period_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.weekday_totals(self._make_store(), "2026-11-20", "2026-11-01")
+        with self.assertRaises(ValueError):
+            report_feature.week_totals(self._make_store(), "2026-11-20", "2026-11-01")
+
+
 if __name__ == "__main__":
     unittest.main()
