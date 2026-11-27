@@ -343,7 +343,7 @@ class UncategorizedTest(StoreCase):
 
 
 class CatCommandTest(StoreCase):
-    """명령 cat — add·remove·list·apply·uncat. cli.main([...]) 으로 실행한다."""
+    """명령 cat — add·remove·list·apply·uncat·set·unfix. cli.main([...]) 으로 실행한다."""
 
     def setUp(self):
         super().setUp()
@@ -396,6 +396,43 @@ class CatCommandTest(StoreCase):
     def test_uncat(self):
         self.assertEqual(self.cat("uncat"), ["1번  2026-11-12  9,000원  김민수  회의 후 저녁",
                                              "2번  2026-11-12  36,000원  김민수  현수막", "미분류 2건"])
+
+    def test_set_then_apply_keeps_fixed(self):
+        # 직접 지정은 앞뒤 공백을 떼고 고정한 뒤 저장, 다시 분류해도 그대로(확장 필수 "직접 지정 + 고정")
+        self.assertEqual(self.cat("set", "2", " 물품 "), ["분류 지정 2번: 물품 (고정, cat unfix 2 로 풀기)"])
+        e = self.saved()[1]
+        self.assertEqual((e["category"], e["category_fixed"]), ("물품", True))
+        self.cat("add", "식비", "--keywords", "저녁", "현수막")
+        self.assertEqual(self.cat("apply"), ["1번: 미분류 → 식비", "1건을 다시 분류했습니다"])
+        self.assertEqual([e["category"] for e in self.saved()], ["식비", "물품", "장소"])
+
+    def test_unfix_then_apply_follows_rule(self):
+        # 고정을 풀면 분류 이름은 그대로 저장되고, 다음 다시 분류 때 규칙을 따른다
+        self.assertEqual(self.cat("unfix", "3"), ["분류 고정 풀기 3번: 장소 (다음 cat apply 때 규칙을 따름)"])
+        e = self.saved()[2]
+        self.assertEqual((e["category"], e["category_fixed"]), ("장소", False))
+        self.cat("add", "식비", "--keywords", "저녁")
+        self.assertEqual(self.cat("apply"), ["1번: 미분류 → 식비", "3번: 장소 → 식비", "2건을 다시 분류했습니다"])
+
+    def test_set_without_rules_setting(self):
+        # set·unfix 는 규칙 파일을 쓰지 않으므로 설정에 rules 가 없어도 된다
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump({"data": self.store.path}, f, ensure_ascii=False)
+        self.assertEqual(self.cat("set", "1", "식비"), ["분류 지정 1번: 식비 (고정, cat unfix 1 로 풀기)"])
+        self.assertEqual(self.cat("unfix", "1"), ["분류 고정 풀기 1번: 식비 (다음 cat apply 때 규칙을 따름)"])
+
+    def test_set_unfix_bad_input_error_message(self):
+        # 없는 번호·빈 분류·고정 안 된 지출은 "오류: 이유" 한 줄과 종료 코드 1, 자료는 그대로
+        for argv, reason in ((("set", "9", "식비"), "9번 지출이 없습니다"),
+                             (("set", "1", " "), "분류 이름을 입력하세요"),
+                             (("unfix", "1"), "고정되지 않은 지출입니다: 1번")):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    code = cli.main(["--config", self.config, "cat", *argv], out=print)
+                self.assertEqual((code, err.getvalue()), (1, f"오류: {reason}\n"))
+        self.assertEqual([(e["category"], e.get("category_fixed")) for e in self.saved()],
+                         [(None, None), (None, None), ("장소", True)])
 
 
 class SummaryTest(StoreCase):

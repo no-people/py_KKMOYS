@@ -6,6 +6,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 """
 
 from ..common import money
+from ..common.queries import category_of
 from ..common.rules import UNCATEGORIZED
 from ..features import categorize
 
@@ -27,6 +28,11 @@ def add_parser(sub, period_args):
     apply = grp.add_parser("apply", help="규칙으로 전체 지출 다시 분류(직접 정한 분류는 그대로)")
     apply.add_argument("--preview", action="store_true", help="바뀔 목록만 보이고 자료는 바꾸지 않음")
     grp.add_parser("uncat", help="미분류 지출 목록")
+    fix = grp.add_parser("set", help="분류 직접 지정(다시 분류해도 바뀌지 않게 고정)")
+    fix.add_argument("eid", type=int, help="지출 번호")
+    fix.add_argument("category", help="분류 이름(예: 식비, 장소, 교통)")
+    unfix = grp.add_parser("unfix", help="직접 지정한 분류의 고정 풀기(분류 이름은 그대로)")
+    unfix.add_argument("eid", type=int, help="지출 번호")
     return grp
 
 
@@ -54,6 +60,15 @@ def _describe(i, rule):
 
 
 def run(c, args, cfg, store, out):
+    # set·unfix 는 규칙 파일을 쓰지 않으므로 rules 설정이 없어도 된다
+    if c == "set":
+        e = categorize.set_category(store, args.eid, args.category)
+        out(f"분류 지정 {e['id']}번: {e['category']} (고정, cat unfix {e['id']} 로 풀기)")
+        return True   # 자료가 바뀌었으니 저장
+    if c == "unfix":
+        e = categorize.unfix_category(store, args.eid)
+        out(f"분류 고정 풀기 {e['id']}번: {category_of(e)} (다음 cat apply 때 규칙을 따름)")
+        return True
     path = _rules_path(cfg)
     if c == "add":
         rules = categorize.load_rules(path)
