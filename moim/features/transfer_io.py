@@ -17,6 +17,7 @@ import os
 from ..common import dates, ledger, money  # noqa: F401
 from ..common.csvio import detect_encoding, read_csv_rows  # noqa: F401
 from ..common.queries import active_members, category_of, expenses_in  # noqa: F401
+from ..common.rules import UNCATEGORIZED
 
 EXPORT_FIELDS = ("id", "date", "payer", "amount", "category", "members", "weights", "memo")
 
@@ -107,9 +108,97 @@ def verify_export(store, path, start=None, end=None, category=None):
     return exported_total == expected_total, exported_total, expected_total
 
 
+def _normalize_weights_map(raw_weights):
+    if not raw_weights:
+        return ()
+    if isinstance(raw_weights, dict):
+        return tuple(sorted((str(k).strip(), int(v)) for k, v in raw_weights.items()))
+    if isinstance(raw_weights, str):
+        pairs = []
+        for token in raw_weights.split(","):
+            part = token.strip()
+            if not part:
+                continue
+            if ":" not in part:
+                raise ValueError(f"비율 형식이 잘못되었습니다: {part}")
+            name, ratio = part.split(":", 1)
+            pairs.append((name.strip(), int(ratio.strip())))
+        return tuple(sorted(pairs))
+    raise ValueError("지원하지 않는 비율 형식입니다")
+
+
+def _normalize_record(record):
+    eid = int(record["id"])
+    day = dates.fmt(record["date"])
+    payer = str(record["payer"]).strip()
+    won = money.to_won(record["amount"])
+    cat = category_of(record)
+    raw_members = record.get("members", [])
+    if isinstance(raw_members, str):
+        members = tuple(m.strip() for m in raw_members.split(",") if m.strip())
+    else:
+        members = tuple(str(m).strip() for m in raw_members)
+    weights = _normalize_weights_map(record.get("weights"))
+    memo = str(record.get("memo") or "").strip()
+    return (eid, day, payer, won, cat, members, weights, memo)
+
+
+def _read_exported_records(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"파일이 없습니다: {path}")
+    _, ext = os.path.splitext(path)
+    if ext.lower() == ".json":
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            rows = data.get("expenses", [])
+        elif isinstance(data, list):
+            rows = data
+        else:
+            raise ValueError(f"지원하지 않는 JSON 형식입니다: {path}")
+        return [r for r in rows if not r.get("deleted")]
+
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError(f"CSV 머리글이 없습니다: {path}")
+        return list(reader)
+
+
 def roundtrip_check(store, path, start=None, end=None, category=None):
     """내보낸 파일을 다시 읽어 원래 기록과 똑같은지 대조. 다른 번호 목록을 돌려준다(비어 있으면 같음)."""
-    raise NotImplementedError("이 함수를 구현한다")
+    expected_items = _select_expenses(store, start=start, end=end, category=category)
+    exported_rows = _read_exported_records(path)
+
+    expected_by_id = {}
+    for item in expected_items:
+        norm = _normalize_record(item)
+        expected_by_id[norm[0]] = norm
+
+    diff_ids = set()
+    seen_ids = set()
+    for row in exported_rows:
+        try:
+            norm = _normalize_record(row)
+        except (KeyError, TypeError, ValueError):
+            raw_id = row.get("id") if isinstance(row, dict) else None
+            if raw_id is not None and str(raw_id).strip().isdigit():
+                diff_ids.add(int(str(raw_id).strip()))
+            else:
+                diff_ids.update(expected_by_id.keys())
+            continue
+        eid = norm[0]
+        if eid in seen_ids:
+            diff_ids.add(eid)
+        seen_ids.add(eid)
+        if eid not in expected_by_id or expected_by_id[eid] != norm:
+            diff_ids.add(eid)
+
+    for eid in expected_by_id:
+        if eid not in seen_ids:
+            diff_ids.add(eid)
+
+    return sorted(diff_ids)
 
 
 def import_csv(store, path, mapping=None, encoding=None, preview=False):
