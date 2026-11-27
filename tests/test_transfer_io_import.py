@@ -21,7 +21,8 @@ class TestTransferIoImport(StoreCase):
             }
         ]
         self.store.data["next_id"] = 2
-        self.store.data["locks"] = {"2026-10": "2026-10-31"}
+        self.store.data["locks"] = {"2026-10": {"at": "2026-10-31"}}
+
 
         csv_path = self.path("import_cp949.csv")
         csv_lines = (
