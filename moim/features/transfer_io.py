@@ -218,7 +218,7 @@ def import_csv(store, path, mapping=None, encoding=None, preview=False):
                     memo=memo,
                     action="import",
                 )
-                added.append(exp["id"])
+                added.append(eid["id"])
         except ValueError as exc:
             errors.append((lineno, str(exc)))
 
