@@ -30,6 +30,10 @@ def add_parser(sub, period_args):
     s_mon.add_argument("--from", dest="first", required=True, help="시작 월 (YYYY-MM)")
     s_mon.add_argument("--to", dest="last", required=True, help="끝 월 (YYYY-MM)")
 
+    s_trend = grp.add_parser("trend", help="여러 달 지출 추이(합계·전월 대비 증감·증감률) 표와 막대그래프")
+    s_trend.add_argument("--from", dest="first", required=True, help="시작 월 (YYYY-MM)")
+    s_trend.add_argument("--to", dest="last", required=True, help="끝 월 (YYYY-MM)")
+
     s_month = grp.add_parser("month", help="월간 보고서")
     s_month.add_argument("--month", required=True, help="기준 월 (YYYY-MM)")
 
@@ -118,6 +122,10 @@ def run(c, args, cfg, store, out):
 
     if c == "monthly":
         out(report_feat.monthly_table(store, args.first, args.last))
+        return False
+
+    if c == "trend":
+        out(report_feat.monthly_trend_table(store, args.first, args.last))
         return False
 
     if c == "month":

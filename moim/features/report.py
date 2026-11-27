@@ -111,6 +111,13 @@ def period_summary(store, start, end):
     }
 
 
+def _rate(diff, prev):
+    if prev == 0:
+        return None
+    raw_rate = (Decimal(diff) * Decimal(100)) / Decimal(prev)
+    return float(raw_rate.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) or 0.0
+
+
 def month_over_month(store, month):
     """전월 대비. 돌려주는 값: (이번 달, 지난달, 증감, 증감률 % 또는 None)"""
     year, mon = _to_ym_tuple(month)
@@ -119,14 +126,7 @@ def month_over_month(store, month):
     cur_total = period_total(store, *_month_bounds((year, mon)))
     prev_total = period_total(store, *_month_bounds(prev_ym))
     diff = cur_total - prev_total
-
-    if prev_total == 0:
-        rate = None
-    else:
-        raw_rate = (Decimal(diff) * Decimal(100)) / Decimal(prev_total)
-        rate = float(raw_rate.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) or 0.0
-
-    return (cur_total, prev_total, diff, rate)
+    return (cur_total, prev_total, diff, _rate(diff, prev_total))
 
 
 def weekday_totals(store, start, end):
@@ -219,6 +219,34 @@ def monthly_table(store, start_month, end_month):
     amounts = monthly_totals(store, start_month, end_month)   # {'YYYY-MM': 합계}
     rows = [[k, v] for k, v in amounts.items()]
     body = table(["월", "지출 합계"], rows, total=["합계", sum(amounts.values())], numeric={1})
+    chart = bar_chart(amounts, bar_width=BAR_WIDTH)
+    return f"{body}\n\n{chart}"
+
+
+def monthly_trend_table(store, start_month, end_month):
+    """여러 달 지출 추이 표(월별 합계·전월 대비 증감·증감률)와 막대그래프."""
+    amounts = monthly_totals(store, start_month, end_month)
+    rows = []
+    prev_amt = None
+    for ym_str, amt in amounts.items():
+        if prev_amt is None:
+            diff_str = "-"
+            rate_str = "-"
+        else:
+            diff = amt - prev_amt
+            sign = "+" if diff > 0 else ""
+            diff_str = f"{sign}{money.fmt(diff)}"
+            rate = _rate(diff, prev_amt)
+            rate_str = "-" if rate is None else f"{sign}{rate:.1f}%"
+        rows.append([ym_str, amt, diff_str, rate_str])
+        prev_amt = amt
+
+    body = table(
+        ["월", "지출 합계", "전월 대비", "증감률"],
+        rows,
+        total=["합계", sum(amounts.values()), "", ""],
+        numeric={1, 2, 3},
+    )
     chart = bar_chart(amounts, bar_width=BAR_WIDTH)
     return f"{body}\n\n{chart}"
 
