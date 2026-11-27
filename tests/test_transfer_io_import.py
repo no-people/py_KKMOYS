@@ -8,14 +8,6 @@ KIM, LEE, PARK = NAMES
 
 
 class TestTransferIoImport(StoreCase):
-    def setUp(self):
-        super().setUp()
-        self.store.data["members"] = [
-            {"name": KIM, "joined": "2026-01-01"},
-            {"name": LEE, "joined": "2026-01-01"},
-            {"name": PARK, "joined": "2026-01-01"},
-        ]
-
     def test_import_csv_cp949_mapping_duplicates_and_errors(self):
         self.store.data["expenses"] = [
             {
@@ -55,9 +47,9 @@ class TestTransferIoImport(StoreCase):
         }
         res = transfer_io.import_csv(self.store, csv_path, mapping=mapping)
         self.assertEqual(res["encoding"], "cp949")
-        self.assertEqual(res["added"], list((2, 3)))
-        self.assertEqual(res["duplicates"], list((3, 4)))
-        self.assertEqual(len(res["errors"]), 2)
+        self.assertEqual(res["added"], list((2, 3)), res)
+        self.assertEqual(res["duplicates"], list((3, 4)), res)
+        self.assertEqual(len(res["errors"]), 2, res)
         first_err, second_err = res["errors"]
         first_err_line, _ = first_err
         second_err_line, _ = second_err
@@ -76,8 +68,8 @@ class TestTransferIoImport(StoreCase):
             f.write("\n".join(csv_lines) + "\n")
 
         res = transfer_io.import_csv(self.store, csv_path, preview=True)
-        self.assertEqual(res["added"], list((2, 3)))
-        self.assertEqual(len(res["errors"]), 1)
+        self.assertEqual(res["added"], list((2, 3)), res)
+        self.assertEqual(len(res["errors"]), 1, res)
         self.assertEqual(self.store.data["expenses"], list())
 
     def test_cli_import_csv_preview_and_apply(self):
