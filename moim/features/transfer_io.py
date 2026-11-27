@@ -161,7 +161,7 @@ def import_csv(store, path, mapping=None, encoding=None, preview=False):
     preview=True 면 실제로 넣지 않고 검사만 한다. 이때 added 에는 들어갈 줄 번호가 담긴다."""
     enc, rows = read_csv_rows(path, mapping=mapping, encoding=encoding)
     if rows:
-        _, sample = rows
+        _, sample = next(iter(rows))
         missing = [req for req in IMPORT_REQUIRED_FIELDS if req not in sample]
         if missing:
             raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
