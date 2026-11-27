@@ -80,8 +80,8 @@ def remove_rule(rules, index):
 def matches(rule, e):
     """규칙의 조건을 모두 만족하는가. 키워드는 하나라도 메모에 있으면 만족."""
     keywords = rule.get("keywords") or []
-    memo = e.get("memo") or ""
-    if keywords and not any(k in memo for k in keywords):
+    memo = (e.get("memo") or "").casefold()   # 영문 대소문자는 구분하지 않는다("Taxi" = "TAXI")
+    if keywords and not any(k.casefold() in memo for k in keywords):
         return False
     if rule.get("payer") is not None and e.get("payer") != rule["payer"]:
         return False
