@@ -207,17 +207,17 @@ def import_csv(store, path, mapping=None, encoding=None, preview=False):
             if preview:
                 added.append(lineno)
             else:
-                expense = {
-                    "date": day,
-                    "payer": payer,
-                    "amount": won,
-                    "category": category,
-                    "members": members,
-                    "memo": memo,
-                }
-                if weights is not None:
-                    expense["weights"] = weights
-                eid = ledger.insert(store, expense, action="import")
+                eid = ledger.insert(
+                    store,
+                    day,
+                    payer,
+                    won,
+                    members,
+                    category=category,
+                    weights=weights,
+                    memo=memo,
+                    action="import",
+                )
                 added.append(eid)
         except ValueError as exc:
             errors.append((lineno, str(exc)))
