@@ -223,6 +223,38 @@ def monthly_table(store, start_month, end_month):
     return f"{body}\n\n{chart}"
 
 
+def monthly_trend_table(store, start_month, end_month):
+    """여러 달 지출 추이 표(월별 합계·전월 대비 증감·증감률)와 막대그래프."""
+    amounts = monthly_totals(store, start_month, end_month)
+    rows = []
+    prev_amt = None
+    for ym_str, amt in amounts.items():
+        if prev_amt is None:
+            diff_str = "-"
+            rate_str = "-"
+        else:
+            diff = amt - prev_amt
+            sign = "+" if diff > 0 else ""
+            diff_str = f"{sign}{money.fmt(diff)}"
+            if prev_amt == 0:
+                rate_str = "-"
+            else:
+                raw_rate = (Decimal(diff) * Decimal(100)) / Decimal(prev_amt)
+                rate = float(raw_rate.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) or 0.0
+                rate_str = f"{sign}{rate:.1f}%"
+        rows.append([ym_str, amt, diff_str, rate_str])
+        prev_amt = amt
+
+    body = table(
+        ["월", "지출 합계", "전월 대비", "증감률"],
+        rows,
+        total=["합계", sum(amounts.values()), "", ""],
+        numeric={1, 2, 3},
+    )
+    chart = bar_chart(amounts, bar_width=BAR_WIDTH)
+    return f"{body}\n\n{chart}"
+
+
 def month_report(store, month):
     """월간 보고서: 총 지출, 분류별 표·그래프, 인원별 낸 돈 표."""
     ym = _to_ym_tuple(month)

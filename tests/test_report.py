@@ -817,5 +817,54 @@ class TestWeekdayAndWeekTotals(unittest.TestCase):
             report_feature.week_totals(self._make_store(), "2026-11-20", "2026-11-01")
 
 
+class TestMonthlyTrendTable(unittest.TestCase):
+    def _make_store(self):
+        return SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-09-10", "payer": "이서연", "amount": 10000, "members": ["이서연"]},
+                    {"id": 2, "date": "2026-10-15", "payer": "김민수", "amount": 15000, "members": ["김민수"]},
+                    # 2026-11 지출 0원 -> 전월 대비 -15,000 (-100.0%), 다음 달(2026-12) 증감률은 '-'
+                    {"id": 3, "date": "2026-12-05", "payer": "이서연", "amount": 8000, "members": ["이서연"]},
+                    {"id": 4, "date": "2026-12-20", "payer": "박지훈", "amount": 50000, "members": ["박지훈"], "deleted": True},
+                ]
+            }
+        )
+
+    def test_monthly_trend_table_and_command(self):
+        out = report_feature.monthly_trend_table(self._make_store(), "2026-09", "2026-12")
+        expected = "\n".join([
+            "월       지출 합계  전월 대비  증감률",
+            "-------  ---------  ---------  -------",
+            "2026-09     10,000          -        -",
+            "2026-10     15,000     +5,000   +50.0%",
+            "2026-11          0    -15,000  -100.0%",
+            "2026-12      8,000     +8,000        -",
+            "-------  ---------  ---------  -------",
+            "합계        33,000",
+            "",
+            "2026-09  ####################            10,000",
+            "2026-10  ##############################  15,000",
+            "2026-11                                       0",
+            "2026-12  ################                 8,000",
+        ])
+        self.assertEqual(out, expected)
+
+        lines = []
+        changed = report_cmd.run(
+            "trend",
+            SimpleNamespace(first="2026-09", last="2026-12"),
+            {},
+            self._make_store(),
+            lines.append,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(lines, [expected])
+
+    def test_monthly_trend_invalid_range_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            report_feature.monthly_trend_table(self._make_store(), "2026-12", "2026-09")
+
+
 if __name__ == "__main__":
     unittest.main()
