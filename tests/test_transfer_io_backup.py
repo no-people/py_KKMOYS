@@ -35,7 +35,7 @@ class TestTransferIoBackupRestore(StoreCase):
         self.store.data["next_id"] = 3
         self.store.save()
 
-        bak_path = self.path("sub", "full_backup.json")
+        bak_path = os.path.join(self.path("sub"), "full_backup.json")
         m_cnt, e_cnt = transfer_io.backup_all(self.store, bak_path)
         self.assertEqual((m_cnt, e_cnt), (3, 1))
         self.assertTrue(os.path.exists(bak_path))
