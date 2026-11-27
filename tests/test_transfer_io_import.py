@@ -8,6 +8,14 @@ KIM, LEE, PARK = NAMES
 
 
 class TestTransferIoImport(StoreCase):
+    def setUp(self):
+        super().setUp()
+        self.store.data["members"] = [
+            {"name": KIM, "joined": "2026-01-01"},
+            {"name": LEE, "joined": "2026-01-01"},
+            {"name": PARK, "joined": "2026-01-01"},
+        ]
+
     def test_import_csv_cp949_mapping_duplicates_and_errors(self):
         self.store.data["expenses"] = [
             {
@@ -20,19 +28,10 @@ class TestTransferIoImport(StoreCase):
                 "memo": "기존 지출",
             }
         ]
+        self.store.data["next_id"] = 2
         self.store.data["locks"] = list(("2026-10",))
 
         csv_path = self.path("import_cp949.csv")
-        lines = (
-            "지출일,결제자,금액,분류,참여자,비율,메모",
-            f"2026-11-05,{LEE},24000,교통,{KIM},{LEE},2:1,택시",
-            f"2026-11-01,{KIM},10000,식비,,,장부 중복",
-            f"2026-11-05,{LEE},24000,교통,,,파일 중복",
-            f"2026-11-06,없는사람,5000,식비,,,미등록 회원 오류",
-            f"2026-10-15,{KIM},8000,식비,,,확정 기간 오류",
-            f"2026-11-07,{PARK},15000,,,,기본 참여자",
-        )
-        # 2행의 쉼표가 겹치지 않게 아래처럼 정상 CSV 행으로 구성
         csv_lines = (
             "지출일,결제자,금액,분류,참여자,비율,메모",
             f'2026-11-05,{LEE},24000,교통,"{KIM},{LEE}","{KIM}:2,{LEE}:1",택시',
