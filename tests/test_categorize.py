@@ -274,6 +274,33 @@ class ApplyRulesTest(StoreCase):
         self.assertEqual((last["id"], last["action"], last["before"]["category"], last["after"]["category"]),
                          (3, "edit", "교통", "식비"))
 
+    def test_reapply_after_rules_changed(self):
+        # 규칙을 바꾼 뒤 다시 분류하면 이미 분류된 지출도 새 규칙을 따르고, 고정된 지출은 그대로(확장 필수)
+        self.store.data["expenses"] += [_expense(1, "저녁"), _expense(2, "회의 후 저녁"),
+                                        _expense(3, "저녁", "장소", category_fixed=True)]
+        categorize.apply_rules(self.store, self.rules)
+        categorize.add_rule(self.rules, "회식", ["저녁"], priority=1)
+        self.assertEqual(categorize.apply_rules(self.store, self.rules), [(1, "식비", "회식"), (2, "식비", "회식")])
+        self.assertEqual([e["category"] for e in self.store.data["expenses"]], ["회식", "회식", "장소"])
+
+    def test_error_midway_changes_nothing(self):
+        # 뒤쪽 지출의 금액·분류 형식이 잘못되면 ValueError, 앞쪽 지출도 바뀌지 않고 이력도 없다(#68 의견 3)
+        for bad in (_expense(2, "저녁", amount="abc"), _expense(2, "저녁", 5)):
+            with self.subTest(bad=bad):
+                self.store.data["expenses"] = [_expense(1, "저녁"), bad]
+                with self.assertRaises(ValueError):
+                    categorize.apply_rules(self.store, self.rules)
+                self.assertIsNone(self.store.data["expenses"][0]["category"])
+                self.assertEqual(self.store.data["history"], [])
+
+    def test_broken_history_changes_nothing(self):
+        # 이력 칸이 깨져 있으면 ValueError, 지출은 바뀌지 않는다
+        self.store.data["expenses"].append(_expense(1, "저녁"))
+        self.store.data["history"] = "깨짐"
+        with self.assertRaises(ValueError):
+            categorize.apply_rules(self.store, self.rules)
+        self.assertIsNone(self.store.data["expenses"][0]["category"])
+
 
 class SetCategoryTest(StoreCase):
     """set_category·unfix_category — 직접 지정하면 고정, 다시 분류해도 그대로. 고정을 풀면 규칙을 따름."""

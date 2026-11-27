@@ -106,7 +106,8 @@ def classify(e, rules):
 def apply_rules(store, rules, preview=False):
     """전체 지출을 다시 분류한다. 직접 정한 분류(고정)는 건너뛴다.
     돌려주는 값: 바뀌는 목록 [(번호, 이전 분류, 새 분류)]. preview=True 면 실제로 바꾸지 않는다."""
-    changes = []
+    # 1) 먼저 전부 계산한다. 중간 지출에서 오류가 나면 아무것도 바뀌지 않는다
+    plan = []
     for e in store.data["expenses"]:
         # 삭제 표시(규약 6-1)·고정(category_fixed, 없는 옛 지출은 False)·확정 기간(규약 6)은 건너뜀
         if e.get("deleted", False) or e.get("category_fixed", False) or is_locked(store, e["date"]):
@@ -115,12 +116,14 @@ def apply_rules(store, rules, preview=False):
         old = category_of(e)
         if new is None or new == old:   # 맞는 규칙이 없으면 원래 분류를 그대로 둔다
             continue
-        changes.append((e["id"], old, new))
-        if not preview:
-            before = dict(e)
-            e["category"] = new
-            store.record("edit", e["id"], before, e)
-    return changes
+        plan.append((e, old, new))
+    # 2) 문제가 없을 때만 바꾼다. 이력을 먼저 남겨 이력이 깨져 있으면 지출도 그대로(set_category 와 같은 방식)
+    if not preview:
+        for e, _, new in plan:
+            after = dict(e, category=new)
+            store.record("edit", e["id"], e, after)
+            e.update(after)
+    return [(e["id"], old, new) for e, old, new in plan]
 
 
 def _editable_expense(store, eid):
