@@ -865,6 +865,29 @@ class TestMonthlyTrendTable(unittest.TestCase):
         with self.assertRaises(ValueError):
             report_feature.monthly_trend_table(self._make_store(), "2026-12", "2026-09")
 
+    def test_monthly_trend_edge_cases(self):
+        # 1. 한 달만 지정
+        single = report_feature.monthly_trend_table(self._make_store(), "2026-10", "2026-10")
+        self.assertIn("2026-10     15,000          -       -", single)
+
+        # 2. 연속 두 달이 0원 (0 -> 0: 증감 0, 증감률 '-')
+        zero_streak = report_feature.monthly_trend_table(self._make_store(), "2025-01", "2025-02")
+        self.assertIn("2025-01          0          -       -", zero_streak)
+        self.assertIn("2025-02          0          0       -", zero_streak)
+
+        # 3. 12월에서 다음 해 1월로 넘어가는 경우
+        year_store = SimpleNamespace(
+            data={
+                "expenses": [
+                    {"id": 1, "date": "2026-12-20", "payer": "이서연", "amount": 10000, "members": ["이서연"]},
+                    {"id": 2, "date": "2027-01-10", "payer": "김민수", "amount": 12000, "members": ["김민수"]},
+                ]
+            }
+        )
+        cross_year = report_feature.monthly_trend_table(year_store, "2026-12", "2027-01")
+        self.assertIn("2026-12     10,000          -       -", cross_year)
+        self.assertIn("2027-01     12,000     +2,000  +20.0%", cross_year)
+
 
 if __name__ == "__main__":
     unittest.main()
