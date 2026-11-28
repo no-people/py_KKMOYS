@@ -86,8 +86,41 @@ def balance_sum(rows):
 
 
 def minimal_transfers(rows):
-    """송금 횟수를 줄인 '누가 누구에게 얼마' 목록. 가장 많이 보낼 사람이 가장 많이 받을 사람에게 보내는 방식."""
-    raise NotImplementedError("이 함수를 구현한다")
+    """송금 횟수를 줄인 '누가 누구에게 얼마' 목록. 가장 많이 보낼 사람이 가장 많이 받을 사람에게 보내는 방식.
+
+    rows: balances 의 결과({이름: {"balance": 원, ...}}).
+    돌려주는 값: [(보낼 사람, 받을 사람, 원)] — 보내는 순서대로. 다 보내면 모든 잔액이 0 이 되고, 송금은 사람 수 - 1 번 이하.
+    금액이 같으면 rows 순서(명부 순서)가 앞인 사람부터. 잔액 합이 0 이 아니면 ValueError(나눌 수 없음).
+    """
+    debtors, creditors = [], []   # [남은 금액, rows 안 순서, 이름]
+    for i, (name, row) in enumerate(rows.items()):
+        try:
+            balance = row["balance"]
+        except (KeyError, TypeError):   # 잔액 줄이 깨져 있어도 이유를 담은 ValueError 로 (규격 0장 오류 약속)
+            raise ValueError(f"{name}의 잔액이 없습니다: {row!r}") from None
+        if type(balance) is not int:
+            raise ValueError(f"{name}의 잔액이 원 단위 정수가 아닙니다: {balance!r}")
+        if balance < 0:
+            debtors.append([-balance, i, name])
+        elif balance > 0:
+            creditors.append([balance, i, name])
+    total = sum(c[0] for c in creditors) - sum(d[0] for d in debtors)
+    if total != 0:
+        raise ValueError(f"잔액 합이 0이 아니라 송금 목록을 만들 수 없습니다: {money.fmt(total)}원")
+    out = []
+    while debtors and creditors:
+        debtors.sort(key=lambda x: (-x[0], x[1]))
+        creditors.sort(key=lambda x: (-x[0], x[1]))
+        give, take = debtors[0], creditors[0]
+        won = min(give[0], take[0])
+        out.append((give[2], take[2], won))
+        give[0] -= won
+        take[0] -= won
+        if give[0] == 0:
+            debtors.pop(0)
+        if take[0] == 0:
+            creditors.pop(0)
+    return out
 
 
 def record_transfer(store, date, frm, to, amount):

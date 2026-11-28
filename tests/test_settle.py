@@ -721,6 +721,113 @@ class SettleBalanceCommandTest(StoreCase):
         self.assertEqual(repr(self.store.data), before)
 
 
+class MinimalTransfersTest(StoreCase):
+    """settle.minimal_transfers 와 명령 settle transfers. 공고문 기능 4 확장 필수 "송금 횟수를 줄인 누가 누구에게 얼마"."""
+
+    KIM, LEE, PARK = "김민수", "이서연", "박지훈"
+
+    @staticmethod
+    def rows(**balances):
+        return {name: {"paid": 0, "owed": 0, "sent": 0, "received": 0, "balance": b} for name, b in balances.items()}
+
+    def settle_all(self, rows, transfers):
+        # 송금을 그대로 반영하면 모든 잔액이 0 이 되는지
+        left = {name: r["balance"] for name, r in rows.items()}
+        for frm, to, won in transfers:
+            self.assertGreater(won, 0)
+            left[frm] += won
+            left[to] -= won
+        return left
+
+    def _add(self, date, payer, amount, members=None):
+        self.store.data["expenses"].append({
+            "id": self.store.new_id(), "date": date, "payer": payer, "amount": amount,
+            "members": members or [self.KIM, self.LEE, self.PARK], "weights": None, "category": None,
+            "memo": "", "deleted": False, "recurring_id": None})
+
+    def test_basic(self):
+        # 김민수가 9,000 낸 경우: 이서연·박지훈이 3,000씩. 금액이 같으면 rows(명부) 순서
+        rows = self.rows(김민수=6000, 이서연=-3000, 박지훈=-3000)
+        self.assertEqual(settle.minimal_transfers(rows), [(self.LEE, self.KIM, 3000), (self.PARK, self.KIM, 3000)])
+
+    def test_largest_first(self):
+        # 가장 많이 보낼 사람(C 120)이 가장 많이 받을 사람(A 100)에게 먼저 보낸다
+        rows = self.rows(A=100, B=50, C=-120, D=-30)
+        self.assertEqual(settle.minimal_transfers(rows), [("C", "A", 100), ("D", "B", 30), ("C", "B", 20)])
+
+    def test_count_at_most_people_minus_one_and_all_settled(self):
+        import random
+        rng = random.Random(4)
+        for _ in range(300):
+            n = rng.randint(1, 7)
+            vals = [rng.randint(-50000, 50000) for _ in range(n - 1)]
+            vals.append(-sum(vals))
+            rows = self.rows(**{f"p{i}": v for i, v in enumerate(vals)})
+            transfers = settle.minimal_transfers(rows)
+            self.assertLessEqual(len(transfers), max(n - 1, 0))
+            self.assertEqual(self.settle_all(rows, transfers), {name: 0 for name in rows})   # 실패하면 남은 잔액이 보인다
+
+    def test_no_transfer_when_all_zero_or_empty(self):
+        self.assertEqual(settle.minimal_transfers(self.rows(김민수=0, 이서연=0)), [])
+        self.assertEqual(settle.minimal_transfers({}), [])
+
+    def test_one_won(self):
+        self.assertEqual(settle.minimal_transfers(self.rows(김민수=1, 이서연=-1)), [(self.LEE, self.KIM, 1)])
+
+    def test_nonzero_sum_raises(self):
+        with self.assertRaisesRegex(ValueError, "잔액 합이 0이 아니라"):
+            settle.minimal_transfers(self.rows(김민수=100, 이서연=-99))
+
+    def test_bad_balance_raises(self):
+        for bad in ("100", 1.5, None, True):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "원 단위 정수"):
+                settle.minimal_transfers(self.rows(김민수=bad, 이서연=-100))
+
+    def test_broken_row_raises(self):
+        for bad in ({}, None, [1]):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "김민수의 잔액이 없습니다"):
+                settle.minimal_transfers({"김민수": bad, "이서연": {"balance": 0}})
+
+    def test_does_not_change_rows(self):
+        rows = self.rows(김민수=6000, 이서연=-3000, 박지훈=-3000)
+        before = repr(rows)
+        settle.minimal_transfers(rows)
+        self.assertEqual(repr(rows), before)
+
+    def test_from_balances_with_remainder_and_recorded_transfer(self):
+        # 10,000 을 박지훈이 냄(3334/3333/3333) + 이서연이 이미 1,000 보냄 → 남은 것만 송금
+        self._add("2026-11-12", self.PARK, 10000)
+        self.store.data["transfers"].append({"date": "2026-11-13", "from": self.LEE, "to": self.PARK, "amount": 1000})
+        rows = settle.balances(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(settle.minimal_transfers(rows), [(self.KIM, self.PARK, 3333), (self.LEE, self.PARK, 2333)])
+
+    def call(self, *argv):
+        lines = []
+        args = cli.build_parser().parse_args(["settle", *argv])
+        changed = cli.run(args, self.cfg, self.store, lines.append)
+        return changed, lines
+
+    def test_command_output(self):
+        # 스켈레톤 PDF 8절 송금 목록 화면 모양: "이름 -> 이름 금액원"
+        self._add("2026-11-12", self.KIM, 9000)
+        changed, lines = self.call("transfers", "--month", "2026-11")
+        self.assertFalse(changed)
+        self.assertEqual(lines, ["이서연 -> 김민수 3,000원", "박지훈 -> 김민수 3,000원"])
+
+    def test_command_period_and_empty(self):
+        self._add("2026-11-09", self.KIM, 9000)
+        _, lines = self.call("transfers", "--start", "2026-11-10", "--end", "2026-11-20")
+        self.assertEqual(lines, ["보낼 송금이 없습니다"])
+        with self.assertRaisesRegex(ValueError, "기간을 지정"):
+            self.call("transfers")
+
+    def test_command_does_not_change_data(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        before = repr(self.store.data)
+        self.call("transfers", "--month", "2026-11")
+        self.assertEqual(repr(self.store.data), before)
+
+
 class TransfersFormatTest(StoreCase):
     """자료 항목 transfers: [{"date", "from", "to", "amount"}]. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목"."""
 
