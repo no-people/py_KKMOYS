@@ -15,3 +15,6 @@ venv/
 
 # macOS
 .DS_Store
+
+# 자료 파일이 깨져 복구할 때 옆에 남기는 깨진 파일(Store.recover, data.json.broken-YYYYMMDD-HHMMSS)
+*.broken-*

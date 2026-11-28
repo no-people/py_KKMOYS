@@ -1,6 +1,8 @@
-"""통합 실행 틀(moim/cli.py)의 오류 안내: "오류: 이유" 한 줄, 종료 코드 1, 오류 때는 저장하지 않음."""
+"""통합 실행 틀(moim/cli.py): 오류 안내("오류: 이유" 한 줄, 종료 코드 1, 오류 때는 저장하지 않음),
+init(기본 설정 파일), 로그 연결(log_dir/오늘.log), 깨진 자료 파일 복구(Store.recover)와 안내."""
 
 import contextlib
+import glob
 import io
 import json
 import logging
@@ -23,6 +25,8 @@ class CliErrorTest(StoreCase):
         self.config = self.path("config.json")
         with open(self.config, "w", encoding="utf-8") as f:
             json.dump({"data": "data.json"}, f)
+        # 백업이 없으면 깨진 자료 파일은 복구하지 못하고 이유를 덧붙여 안내한다(CliRecoverTest)
+        self.NO_BACKUP = f"복구할 수 있는 정상 백업 파일이 없습니다(백업 폴더: {self.path('backup')})"
 
     def call(self, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -104,12 +108,12 @@ class CliErrorTest(StoreCase):
     def test_broken_data_file(self):
         with open(self.store.path, "w", encoding="utf-8") as f:
             f.write('{"members": [\n')
-        self.assert_error(self.call("exp"), f"자료 파일 형식이 잘못되었습니다: {self.store.path} (2번째 줄)")
+        self.assert_error(self.call("exp"), f"자료 파일 형식이 잘못되었습니다: {self.store.path} (2번째 줄). {self.NO_BACKUP}")
 
     def test_data_file_wrong_shape(self):
         with open(self.store.path, "w", encoding="utf-8") as f:
             json.dump({"expenses": []}, f)
-        self.assert_error(self.call("exp"), "자료 파일에 members 항목이 없습니다")
+        self.assert_error(self.call("exp"), f"자료 파일에 members 항목이 없습니다. {self.NO_BACKUP}")
 
     def test_broken_config_file(self):
         with open(self.config, "w", encoding="utf-8") as f:
@@ -142,7 +146,7 @@ class CliErrorTest(StoreCase):
         with open(self.store.path, "wb") as f:
             f.write('{"members": [], "expenses": [], "memo": "회비"}'.encode("cp949"))
         self.assert_error(self.call("exp"),
-                          f"자료 파일의 글자 인코딩을 읽을 수 없습니다(UTF-8 이어야 합니다): {self.store.path}")
+                          f"자료 파일의 글자 인코딩을 읽을 수 없습니다(UTF-8 이어야 합니다): {self.store.path}. {self.NO_BACKUP}")
 
     def test_unicode_error_in_command(self):
         # 명령 안에서 읽은 다른 파일(예: CSV)의 인코딩 오류는 경로 없이 안내한다
@@ -247,8 +251,8 @@ class InitTest(StoreCase):
         self.assertIn("python -m moim --config <경로> init", " ".join(out.getvalue().split()))   # 도움말 줄바꿈 무시
 
 
-class CliLogTest(StoreCase):
-    """로그 연결: 자료를 바꾼 명령은 저장 뒤 화면 줄을 INFO 로, 설정을 읽은 뒤 난 오류는 ERROR 로 log_dir/오늘.log 에."""
+class LogCase(StoreCase):
+    """설정 파일(log_dir=logs)을 쓰고 cli.main 을 실행하며 오늘 로그 파일을 읽는 도우미. 테스트는 없다."""
 
     def setUp(self):
         super().setUp()
@@ -284,6 +288,10 @@ class CliLogTest(StoreCase):
         for line, (level, msg) in zip(lines, expected):
             self.assertRegex(line, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} " + level + " ")
             self.assertEqual(line.split(" ", 3)[3], msg)
+
+
+class CliLogTest(LogCase):
+    """로그 연결: 자료를 바꾼 명령은 저장 뒤 화면 줄을 INFO 로, 설정을 읽은 뒤 난 오류는 ERROR 로 log_dir/오늘.log 에."""
 
     def test_change_logged_after_save(self):
         code, lines, err = self.call("exp", "add", "2026-11-12", "김민수", "36000", ";".join(NAMES), "--memo", "저녁")
@@ -396,6 +404,161 @@ class CliLogTest(StoreCase):
         self.assertFalse(os.path.exists(self.log_dir))
         self.call("member", "add", "최유진", "2026-11-01")   # 같은 설정에서 바꾸는 명령은 남는다
         self.assert_log([("INFO", "명부 추가: 최유진 (가입일 2026-11-01)")])
+
+
+class CliRecoverTest(LogCase):
+    """깨진 자료 파일: Store.recover 로 최근 정상 백업을 되살려 저장하고, 경고 한 줄·로그 WARNING 뒤 명령을 이어 실행."""
+
+    def setUp(self):
+        super().setUp()
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump({"data": "data.json", "log_dir": "logs", "backup_dir": "bk"}, f)
+        self.backup_dir = self.path("bk")
+        self.call("member", "add", "최유진", "2026-11-01")   # 저장 → 직전 자료(명부 3명)가 bk/ 에 백업됨
+        self.backup = Store(self.store.path, self.backup_dir).backups()[-1]
+        self.reset_log()
+
+    def reset_log(self):
+        logger = logging.getLogger(log.LOGGER_NAME)
+        for h in list(logger.handlers):
+            logger.removeHandler(h)
+            h.close()
+        if os.path.exists(self.log_file):
+            os.remove(self.log_file)
+
+    def break_data(self, text='{"members": [\n'):
+        with open(self.store.path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def broken_files(self):
+        return sorted(glob.glob(glob.escape(self.store.path) + ".broken-*"))
+
+    def names(self):
+        with open(self.store.path, encoding="utf-8") as f:
+            return [m["name"] for m in json.load(f)["members"]]
+
+    def test_backup_dir_from_config(self):
+        self.assertEqual(os.path.dirname(self.backup), self.backup_dir)
+        self.assertFalse(os.path.exists(self.path("backup")))
+
+    def test_recover_then_run(self):
+        self.break_data()
+        code, lines, err = self.call("member", "list")
+        self.assertEqual(code, 0)
+        broken = self.broken_files()
+        self.assertEqual(len(broken), 1)
+        reason = f"자료 파일 형식이 잘못되었습니다: {self.store.path} (2번째 줄)"
+        notice = (f"자료 파일이 깨져 마지막 저장 직전 백업으로 되돌렸습니다: {self.backup} ({reason}). "
+                  f"마지막으로 저장한 변경은 빠졌을 수 있으니 확인하십시오. 깨진 파일: {broken[0]}")
+        self.assertEqual(err, f"경고: {notice}\n")
+        self.assertEqual(self.names(), NAMES)            # 백업 자료가 자료 파일로 저장됨
+        self.assertTrue(any("이서연" in line for line in lines))   # 명령은 되살린 자료로 실행
+        with open(broken[0], encoding="utf-8") as f:
+            self.assertEqual(f.read(), '{"members": [\n')   # 깨진 파일은 그대로 옆에 남김
+        self.assert_log([("WARNING", notice)])
+
+    def test_recover_then_change(self):
+        self.break_data()
+        code, _, _ = self.call("member", "add", "정하늘", "2026-11-01")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.names(), NAMES + ["정하늘"])
+        lines = self.log_lines()
+        self.assertEqual([line.split(" ", 3)[2] for line in lines], ["WARNING", "INFO"])
+
+    def test_last_save_missing_after_recover(self):
+        # 백업은 저장 직전 자료: 마지막 저장(최유진 추가)은 되살린 자료에 없다. 안내 문장이 이를 알린다
+        self.break_data()
+        _, _, err = self.call("member", "list")
+        self.assertNotIn("최유진", self.names())
+        self.assertIn("마지막으로 저장한 변경은 빠졌을 수 있으니 확인하십시오", err)
+
+    def test_recover_then_command_error(self):
+        # 복구는 저장되고, 그 뒤 명령 오류는 따로 "오류: 이유" 줄로. 종료 코드 1
+        self.break_data()
+        code, _, err = self.call("member", "add", "김민수", "2026-11-01")
+        self.assertEqual(code, 1)
+        warn, error = err.splitlines()
+        self.assertTrue(warn.startswith("경고: 자료 파일이 깨져 마지막 저장 직전 백업으로 되돌렸습니다: "), warn)
+        self.assertEqual(error, "오류: 이미 명부에 있는 사람입니다: 김민수")
+        self.assertEqual(self.names(), NAMES)   # 되살린 자료는 저장되어 있다
+        self.assertEqual([line.split(" ", 3)[2] for line in self.log_lines()], ["WARNING", "ERROR"])
+
+    def test_save_failure_after_recover_restores_broken_file(self):
+        self.break_data()
+        with mock.patch.object(Store, "save", side_effect=OSError(28, "No space left on device", self.store.path)):
+            code, lines, err = self.call("member", "list")
+        self.assertEqual((code, lines), (1, []))
+        self.assertEqual(err, f"오류: 자료 파일 형식이 잘못되었습니다: {self.store.path} (2번째 줄). "
+                              f"백업으로 되살린 자료를 저장하지 못해 자료 파일을 그대로 두었습니다: "
+                              f"파일을 읽거나 쓸 수 없습니다: {self.store.path} (No space left on device)\n")
+        self.assertEqual(self.broken_files(), [])   # 깨진 파일을 제자리로
+        with open(self.store.path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), '{"members": [\n')
+        code, _, err = self.call("member", "list")   # 다음 실행 때 다시 복구한다
+        self.assertEqual(code, 0)
+        self.assertTrue(err.startswith("경고: "), err)
+        self.assertEqual(self.names(), NAMES)
+
+    def test_recover_skips_broken_latest_backup(self):
+        # 최신 백업도 깨졌으면 그 전 정상 백업으로 되살리고, 안내에도 그 백업 경로가 나온다
+        self.call("member", "add", "정하늘", "2026-11-01")   # 두 번째 백업(명부 4명)
+        backups = Store(self.store.path, self.backup_dir).backups()
+        self.assertEqual(len(backups), 2)
+        with open(backups[-1], "w", encoding="utf-8") as f:
+            f.write("{")
+        self.break_data()
+        code, _, err = self.call("member", "list")
+        self.assertEqual(code, 0)
+        self.assertTrue(err.startswith(f"경고: 자료 파일이 깨져 마지막 저장 직전 백업으로 되돌렸습니다: {self.backup} ("), err)
+        self.assertEqual(self.names(), NAMES)
+
+    def test_recovered_once(self):
+        self.break_data()
+        self.call("member", "list")
+        code, _, err = self.call("member", "list")   # 복구한 뒤에는 멀쩡한 파일
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(self.broken_files()), 1)
+
+    def test_wrong_shape_and_encoding_recovered(self):
+        for broken in ('{"expenses": []}', "[]"):
+            self.break_data(broken)
+            code, _, err = self.call("member", "list")
+            self.assertEqual(code, 0)
+            self.assertTrue(err.startswith("경고: 자료 파일이 깨져 마지막 저장 직전 백업으로 되돌렸습니다: "), err)
+            self.assertEqual(self.names(), NAMES)
+        with open(self.store.path, "wb") as f:
+            f.write('{"members": [], "expenses": [], "memo": "회비"}'.encode("cp949"))
+        code, _, err = self.call("member", "list")
+        self.assertEqual(code, 0)
+        self.assertIn("UTF-8", err)
+        self.assertEqual(self.names(), NAMES)
+
+    def test_no_valid_backup(self):
+        for b in Store(self.store.path, self.backup_dir).backups():
+            with open(b, "w", encoding="utf-8") as f:
+                f.write("{")   # 백업도 깨짐
+        self.break_data()
+        code, lines, err = self.call("member", "list")
+        self.assertEqual((code, lines), (1, []))
+        self.assertEqual(err, f"오류: 자료 파일 형식이 잘못되었습니다: {self.store.path} (2번째 줄). "
+                              f"복구할 수 있는 정상 백업 파일이 없습니다(백업 폴더: {self.backup_dir})\n")
+        self.assertEqual(self.broken_files(), [])   # 깨진 파일은 옮기지 않는다
+        with open(self.store.path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), '{"members": [\n')
+        self.assertEqual([line.split(" ", 3)[2] for line in self.log_lines()], ["ERROR"])
+
+    def test_missing_data_file_not_recovered(self):
+        # 자료 파일이 없는 것은 깨진 것이 아니다: 빈 자료로 시작(Store.load)
+        os.remove(self.store.path)
+        code, _, err = self.call("member", "list")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.broken_files(), [])
+
+    def test_permission_error_not_recovered(self):
+        with mock.patch.object(Store, "load", side_effect=PermissionError(13, "Permission denied", self.store.path)):
+            code, _, err = self.call("member", "list")
+        self.assertEqual((code, err), (1, f"오류: 파일에 접근할 권한이 없습니다: {self.store.path}\n"))
+        self.assertEqual(self.broken_files(), [])
 
 
 if __name__ == "__main__":

@@ -5,10 +5,12 @@
 `init` 은 기본 설정 파일(--config 경로)을 만든다. 설정·자료 파일을 읽지 않는다.
 로그(설정의 log_dir/YYYY-MM-DD.log): 자료를 바꾼 명령은 저장한 뒤 화면에 낸 줄을 INFO 로, 설정을 읽은 뒤 난 오류는 ERROR 로 남긴다.
 조회만 한 명령은 남기지 않는다. 로그를 못 남겨도 명령 결과는 그대로 두고 경고만 한다.
-더할 일: 자료 파일이 깨졌을 때 복구 안내.
+자료 파일이 깨졌으면(JSON 손상·UTF-8 아님·members/expenses 없음) Store.recover 로 최근 정상 백업을 되살려 바로 저장하고,
+"경고: ..." 한 줄과 로그(WARNING)로 알린 뒤 명령을 이어 실행한다. 쓸 백업이 없으면 깨진 파일을 그대로 두고 오류로 안내한다.
 """
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -129,8 +131,44 @@ def write_log(cfg, level, lines, warn=True):
             h.__dict__.pop("handleError", None)   # 다음 사용을 위해 원래 handleError 로 되돌림
 
 
+def load_store(cfg):
+    """자료 파일을 읽는다. 깨졌으면 백업으로 복구해 저장하고 (store, 안내 문장)을, 멀쩡하면 (store, None)을 돌려준다.
+
+    복구할 백업이 없으면 깨진 이유와 함께 ValueError (깨진 파일은 옮기지 않음, Store.recover 약속).
+    되살린 자료를 저장하지 못하면 옮긴 깨진 파일을 제자리로 돌려놓고 ValueError (다음 실행 때 다시 복구한다.
+    자료 파일이 없으면 빈 자료로 시작하므로, 그대로 두면 아무 안내 없이 자료가 비어 보인다).
+    백업은 저장 직전 자료라서, 마지막으로 저장한 변경 한 번은 빠질 수 있다(규약 7). 안내 문장에 알린다.
+    """
+    path = cfg["data"]
+    store = Store(path, backup_dir=cfg["backup_dir"])
+    try:
+        return load_json_file(lambda p: store.load(), path, "자료 파일"), None
+    except ValueError as exc:   # load_json_file 이 JSON·인코딩 오류를, _check_shape 가 모양 오류를 ValueError 로 낸다
+        reason = error_reason(exc)
+    broken_before = set(glob.glob(glob.escape(path) + ".broken-*"))
+    try:
+        store.recover()
+    except ValueError as exc:
+        raise ValueError(f"{reason}. {exc}(백업 폴더: {store.backup_dir})") from None
+    broken = sorted(set(glob.glob(glob.escape(path) + ".broken-*")) - broken_before)
+    try:
+        store.save()   # 깨진 파일은 옆으로 옮겨졌으므로 되살린 자료를 바로 자료 파일로 쓴다
+    except (OSError, ValueError) as exc:
+        if broken and not os.path.exists(path):
+            os.replace(broken[-1], path)
+        raise ValueError(f"{reason}. 백업으로 되살린 자료를 저장하지 못해 자료 파일을 그대로 두었습니다: "
+                         f"{error_reason(exc)}") from None
+    kept = f" 깨진 파일: {broken[-1]}" if broken else ""
+    return store, (f"자료 파일이 깨져 마지막 저장 직전 백업으로 되돌렸습니다: {store.recovered_from} ({reason}). "
+                   f"마지막으로 저장한 변경은 빠졌을 수 있으니 확인하십시오.{kept}")
+
+
 def main(argv=None, out=print):
-    """실행 결과 종료 코드: 성공 0, 오류 1. 오류는 표준 오류에 "오류: 이유" 한 줄로 알리고 저장하지 않는다."""
+    """실행 결과 종료 코드: 성공 0, 오류 1. 오류는 표준 오류에 "오류: 이유" 한 줄로 알리고 저장하지 않는다.
+
+    예외: 깨진 자료 파일을 백업으로 되살린 것은 명령 전에 이미 저장한다(load_store). 그 뒤 명령이 실패하면
+    표준 오류에 복구 "경고: ..." 줄과 "오류: 이유" 줄이 차례로 나온다(서로 다른 일이라 둘 다 알린다).
+    """
     cfg, shown = None, []
 
     def show(line):
@@ -143,7 +181,10 @@ def main(argv=None, out=print):
             init(args.config, out)
             return 0
         cfg = load_json_file(cfgmod.load, args.config, "설정 파일")
-        store = load_json_file(lambda p: Store(p).load(), cfg["data"], "자료 파일")
+        store, recovered = load_store(cfg)
+        if recovered:
+            print(f"경고: {recovered}", file=sys.stderr)
+            write_log(cfg, logging.WARNING, [recovered])
         changed = run(args, cfg, store, show)
         if changed:
             store.save()
