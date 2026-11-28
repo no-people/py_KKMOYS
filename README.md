@@ -53,8 +53,8 @@ Copy-Item config.example.json config.json
 
 명령은 지금 폴더의 `config.json`을 읽습니다. 다른 설정 파일을 쓸 때만 명령 묶음 앞에 `--config`를 붙입니다.
 예: `python -m moim --config 연습.json budget --help`.
-`data` 경로는 설정 파일이 있는 폴더를 기준으로 읽습니다.
-나머지 경로 항목의 자동 변환과 백업·로그 연결은 각 담당 작업이 병합된 뒤 사용할 수 있습니다.
+`data`, `members_file`, `rules`, `backup_dir`, `log_dir`의 상대 경로는 설정 파일이 있는 폴더를 기준으로 해석합니다.
+로그 기록·자동 복구 안내 등 통합 연결은 각 담당 작업이 병합된 뒤 사용할 수 있습니다.
 예산을 바꾸려면 `config.json`의 `budget` 안에 있는 `monthly` 값을 수정합니다.
 
 ### 처음 설정 만들기: 아직 없음
@@ -979,21 +979,22 @@ python -m moim io verify out.csv --month 2026-11
 
 실제 자료와 섞이지 않도록 연습 자료는 별도 폴더에 만드세요.
 출력 위치와 옵션을 먼저 확인합니다.
+아래는 Windows의 `python` 기준입니다. macOS에서 `python` 명령이 없으면 `python3`로 바꿔 실행하세요.
 
 ```bash
 # 연습 자료 만들기의 옵션 보기
-python3 tools/gen_data.py --help
+python tools/gen_data.py --help
 # practice 폴더에 2026년 11월 연습 자료 만들기
-python3 tools/gen_data.py practice --month 2026-11
+python tools/gen_data.py practice --month 2026-11
 ```
 
 ```bash
 # 1) 모든 파이썬 파일에 문법 오류가 없는지 검사 (아무것도 안 나오면 통과)
-python3 -m compileall -q moim tools
+python -m compileall -q moim tools
 # 2) 기능 파일끼리 서로 import 하지 않는지 검사
-python3 tools/check_imports.py
+python tools/check_imports.py
 # 3) tests 폴더의 테스트 전부 실행 (마지막 줄이 OK 면 통과)
-python3 -m unittest discover -s tests
+python -m unittest discover -s tests
 ```
 
 검사 세 가지는 GitHub의 자동 검사(`check`)와 같습니다. 병합 요청을 올리기 전에 직접 실행해 보세요.
