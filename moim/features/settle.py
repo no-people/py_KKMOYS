@@ -16,6 +16,8 @@
 """
 
 import copy
+import datetime as dt
+
 from ..common import dates, ledger, money
 from ..common.queries import expense_shares, expenses_in, is_locked, member_shares, person_paid
 
@@ -166,10 +168,112 @@ def compare(old_rows, new_rows):
     raise NotImplementedError("이 함수를 구현한다")
 
 
+def _month_text(ym):
+    return f"{ym[0]:04d}-{ym[1]:02d}"
+
+
+def _check_day(day):
+    if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 31:
+        raise ValueError(f"반복 날짜는 1~31 정수여야 합니다: {day!r}")
+    return day
+
+
+def _occurrence(day, ym):
+    """그달의 반복 날짜. 그달에 없는 날(31일, 2월 29·30일 등)은 말일로."""
+    return dt.date(ym[0], ym[1], min(day, dates.days_in_month(*ym)))
+
+
+def _recurring_items(store):
+    """추가 함수: recurring 목록을 검사해 돌려준다. null·키 없음은 빈 목록. 깨진 항목이 있으면 하나도 쓰지 않고 ValueError."""
+    items = store.data.get("recurring")
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise ValueError("자료 파일의 recurring 형식이 잘못되었습니다")
+    for i, r in enumerate(items, 1):
+        try:
+            if not isinstance(r, dict):
+                raise ValueError("항목이 사전(dict)이 아닙니다")
+            rid = r["id"]
+            if isinstance(rid, bool) or not isinstance(rid, int):
+                raise ValueError(f"id 가 정수가 아닙니다: {rid!r}")
+            _check_day(r["day"])
+            dates.parse_month(r["start"])
+            r["amount"]   # 금액·이름은 만들 때 ledger.insert 가 검사한다. 여기서는 있는지·모양만
+            if not isinstance(r["payer"], str) or not isinstance(r["members"], list):
+                raise ValueError(f"낸 사람은 문자열, 참여자는 목록이어야 합니다: {r['payer']!r}, {r['members']!r}")
+            if r.get("category") is not None and not isinstance(r["category"], str):
+                raise ValueError(f"분류는 문자열 또는 null 이어야 합니다: {r['category']!r}")
+            made = r.get("made") or []
+            if not isinstance(made, list):
+                raise ValueError(f"made 가 목록이 아닙니다: {made!r}")
+            for m in made:
+                dates.parse_month(m)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"자료 파일의 {i}번째 반복 지출이 잘못되었습니다: {exc}") from None
+    return items
+
+
 def add_recurring(store, day, payer, amount, members, memo, start_month):
-    raise NotImplementedError("이 함수를 구현한다")
+    """매달 day 일의 반복 지출을 등록한다(start_month 달부터). 지출은 run_recurring 이 만든다. 저장하지 않는다.
+
+    낸 사람·참여자·금액은 첫 달의 반복 날짜 기준으로 ledger.validate 와 같게 검사한다(규약 1·4·6-2).
+    분류는 받지 않으므로 None(미분류). 돌려주는 값: 등록한 반복 지출(dict).
+    """
+    _check_day(day)
+    if isinstance(start_month, tuple) and len(start_month) == 2 and all(type(x) is int for x in start_month):
+        start_month = "%d-%d" % start_month   # 규격 0장: 달은 "YYYY-MM" 또는 (연, 월)
+    ym = dates.parse_month(start_month)
+    _, won = ledger.validate(store, _occurrence(day, ym), payer, amount, members)
+    items = _recurring_items(store)
+    r = {
+        "id": max((x["id"] for x in items), default=0) + 1,
+        "day": day,
+        "payer": payer,
+        "amount": won,
+        "members": list(members),
+        "memo": str(memo) if memo is not None else "",
+        "category": None,
+        "start": _month_text(ym),
+        "made": [],
+    }
+    store.data["recurring"] = items + [r]
+    return r
+
+
+def run_recurring_report(store, until):
+    """추가 함수: run_recurring 의 본체. (만든 지출 목록, 건너뛴 달 [(반복 id, "YYYY-MM", 이유)]) 를 돌려준다.
+
+    각 반복 지출의 start 달부터 until 의 달까지, made 에 없는 달마다 반복 날짜(없으면 말일)에 지출을 만든다.
+    반복 날짜가 until 보다 뒤인 달은 아직 만들지 않는다(다음에 만듦). 날짜 순서대로 만들어 지출 번호도 날짜 순이다.
+    ledger.insert 가 거부한 달(정산 확정 기간, 그날 회원이 아님 등)은 만들지 않고 made 에도 넣지 않은 채 건너뛴다.
+    """
+    until = dates.parse(until)
+    last = (until.year, until.month)
+    jobs = []
+    for r in _recurring_items(store):
+        start = dates.parse_month(r["start"])
+        if start > last:
+            continue
+        made = {_month_text(dates.parse_month(m)) for m in (r.get("made") or [])}
+        for ym in dates.months_between(start, last):
+            if _month_text(ym) not in made and _occurrence(r["day"], ym) <= until:
+                jobs.append((ym, r))
+    jobs.sort(key=lambda job: _occurrence(job[1]["day"], job[0]))   # 같은 날이면 목록 순서 그대로(안정 정렬)
+    created, skipped = [], []
+    for ym, r in jobs:
+        try:
+            e = ledger.insert(store, _occurrence(r["day"], ym), r["payer"], r["amount"], r["members"],
+                              r.get("memo", ""), category=r.get("category"), recurring_id=r["id"],
+                              action="recurring")
+        except ValueError as exc:
+            skipped.append((r["id"], _month_text(ym), str(exc)))
+            continue
+        r["made"] = list(r.get("made") or []) + [_month_text(ym)]
+        created.append(e)
+    return created, skipped
 
 
 def run_recurring(store, until):
     """until 날짜까지 아직 만들지 않은 반복 지출을 만든다. 달 말일보다 큰 날은 말일로. 돌려주는 값: 만든 지출 목록."""
-    raise NotImplementedError("이 함수를 구현한다")
+    return run_recurring_report(store, until)[0]
