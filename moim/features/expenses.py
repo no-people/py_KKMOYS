@@ -182,8 +182,18 @@ def undo_last_edit(store, eid):
 
 
 def history(store, eid=None):
-    """수정·삭제 이력. eid 를 주면 그 지출의 이력만."""
-    raise NotImplementedError("이 함수를 구현한다")
+    """수정·삭제 이력. eid 를 주면 그 지출의 이력만.
+    돌려주는 값: 기록된 순서(시간순)의 [{"id", "action", "before", "after", "at"}] 복사본.
+    추가·가져오기 등 모든 action 을 담는다. 없는 지출 번호면 ValueError."""
+    items = store.data.get("history")
+    if items is None:   # 옛 파일: 키 없음·null 은 빈 이력(Store.record 와 같은 기준)
+        items = []
+    if not isinstance(items, list) or not all(isinstance(h, dict) for h in items):
+        raise ValueError("자료 파일의 history 형식이 잘못되었습니다")
+    if eid is not None:
+        eid = store.get_expense(eid)["id"]   # 없는 번호는 빈 목록이 아니라 오류로 알린다
+        items = [h for h in items if h.get("id") == eid]
+    return copy.deepcopy(items)
 
 
 def add_from_file(store, path):
