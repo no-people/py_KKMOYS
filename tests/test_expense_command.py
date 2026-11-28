@@ -1,4 +1,4 @@
-"""명령 exp — add·list·edit·delete·restore·history. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
+"""명령 exp — add·list·edit·delete·restore·history·import-lines. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
 
 import copy
 import os
@@ -312,11 +312,50 @@ class TestExpenseCommand(StoreCase):
         with self.assertRaises(cli.UsageError):
             cli.build_parser().parse_args(["exp", "history", "x"])
 
+    # --- import-lines
+    def write(self, text):
+        p = self.path("lines.csv")
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        return p
+
+    def test_import_lines(self):
+        self.add("2026-11-12", "김민수", "36000", "김민수")
+        p = self.write("# 주석\n2026-11-12,김민수,36000,김민수;이서연,저녁\n"
+                       "2026-11-31,김민수,1000,김민수\n\n2026-11-13,이서연,9000,이서연;박지훈\n")
+        changed, lines = self.cmd("import-lines", p)
+        self.assertTrue(changed)
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], "지출 여러 줄 입력: 2건 추가 (2~3번), 잘못된 줄 1개")
+        self.assertRegex(lines[1], r"^  3번째 줄 건너뜀: .*2026-11-31")
+        self.assertEqual(lines[2], "경고: 2번째 줄: 중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 (1번)")
+        self.assertEqual([e["memo"] for e in self.expenses()], ["", "저녁", ""])
+
+    def test_import_lines_nothing_added(self):
+        changed, lines = self.cmd("import-lines", self.write("2026-11-12,최유진,1000,최유진\n"))
+        self.assertFalse(changed)
+        self.assertEqual(lines[0], "지출 여러 줄 입력: 0건 추가, 잘못된 줄 1개")
+        self.assertEqual(self.expenses(), [])
+
+    def test_import_lines_cli_missing_file(self):
+        import contextlib
+        import io
+        import json
+        from moim import cli
+        cfg = self.path("c.json")
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump({"data": self.store.path}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = cli.main(["--config", cfg, "exp", "import-lines", self.path("없음.csv")], out=lambda s: None)
+        self.assertEqual(code, 1)
+        self.assertIn("파일이 없습니다", err.getvalue())
+
     # --- 하위 명령 없음
     def test_no_subcommand(self):
         changed, lines = self.cmd()
         self.assertFalse(changed)
-        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore, history"))
+        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore, history, import-lines"))
 
 
 if __name__ == "__main__":
