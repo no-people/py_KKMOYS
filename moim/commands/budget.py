@@ -19,6 +19,8 @@ def add_parser(sub, period_args):
     forecast = grp.add_parser("forecast", help="기준일까지의 지출 속도로 월말 금액 예측")
     forecast.add_argument("--month", required=True, help="YYYY-MM")
     forecast.add_argument("--today", required=True, help="선택한 달 안의 기준일(YYYY-MM-DD)")
+    suggest = grp.add_parser("suggest", help="기준월 포함 최근 3개월 평균으로 다음 달 예산 제안")
+    suggest.add_argument("--month", required=True, help="최근 3개월의 마지막 달(YYYY-MM)")
     categories = grp.add_parser("categories", help="분류별 예산·사용액·초과 경보")
     categories.add_argument("--month", required=True, help="YYYY-MM")
     table = grp.add_parser("table", help="분류별 예산 대비 실제 지출 표")
@@ -66,6 +68,10 @@ def run(c, args, cfg, store, out):
         estimate = budget.forecast(store, args.month, args.today)
         out(f"{args.month} 월말 예상 지출: {money.fmt(estimate)}원 "
             f"(기준일: {dates.fmt(args.today)})")
+        return False
+    if c == "suggest":
+        amount = budget.suggest_budget(store, args.month)
+        out(f"기준월 {args.month} 다음 달 예산 제안: {money.fmt(amount)}원")
         return False
     if c == "table":
         rows = budget.budget_table(store, cfg, args.month)
