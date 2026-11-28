@@ -331,6 +331,7 @@ python -m moim exp restore 2
 
 `cat`은 지출 메모의 키워드 등으로 분류를 정합니다. 규칙을 추가한 뒤 미리 보고 적용합니다.
 설정 파일의 `rules` 항목에 규칙 파일 경로가 필요합니다(예제: `"rules": "rules.json"`).
+오류 표에서 `list`·`apply`는 규칙 파일이 `[{"category": 5}]`처럼 분류 이름이 문자열이 아닌 경우이고, `remove 9`는 9번 규칙이 없는 경우입니다. 모두 오류 한 줄·종료 코드 1이며 지출 자료는 저장하지 않습니다.
 `add`와 `remove`는 규칙 파일만 저장하고, `apply`는 바뀐 지출이 있을 때 자료 파일을 저장합니다.
 
 ### 규칙 추가: `add`
@@ -356,7 +357,7 @@ python -m moim cat add 식비 --keywords 저녁 점심
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim cat add " " --keywords 점심` | `오류: 분류 이름을 입력하세요` |
 
 **참고**
 
@@ -386,7 +387,7 @@ python -m moim cat list
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim cat list` | `오류: 규칙 파일의 0번 규칙 형식이 잘못되었습니다` |
 
 **참고**
 
@@ -424,7 +425,7 @@ python -m moim cat apply
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim cat apply` | `오류: 규칙 파일의 0번 규칙 형식이 잘못되었습니다` |
 
 **참고**
 
@@ -477,7 +478,7 @@ python -m moim cat remove 0
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim cat remove 9` | `오류: 9번 규칙이 없습니다` |
 
 **참고**
 
