@@ -38,6 +38,10 @@ def add_parser(sub, period_args):
     p_ver.add_argument("path", help="검증할 CSV 또는 JSON 파일 경로")
     _add_filter_args(p_ver, period_args)
 
+    p_rt = grp.add_parser("roundtrip", help="내보낸 파일 왕복 대조 검증")
+    p_rt.add_argument("path", help="대조할 CSV 또는 JSON 파일 경로")
+    _add_filter_args(p_rt, period_args)
+
     return grp
 
 
@@ -65,6 +69,18 @@ def run(c, args, cfg, store, out):
         )
         status = "일치" if ok else "불일치"
         out(f"검증 {status}: 파일 {money.fmt(file_sum)}원 / 기록 {money.fmt(record_sum)}원")
+        return False
+
+    if c == "roundtrip":
+        start, end = _resolve_period(args)
+        diff_ids = transfer_io.roundtrip_check(
+            store, args.path, start=start, end=end, category=args.category
+        )
+        if not diff_ids:
+            out("왕복 검증 일치: 모든 기록이 같습니다")
+        else:
+            joined = ", ".join(str(i) for i in diff_ids)
+            out(f"왕복 검증 불일치: 다른 지출 번호 {joined}")
         return False
 
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
