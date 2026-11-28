@@ -400,6 +400,13 @@ class TestManageExpense(StoreCase):
         self.assertEqual((e["category"], self.store.data["history"][-1]["after"]["category"]), ("장소", "장소"))
         edit_expense(self.store, e["id"], category=None)
         self.assertIsNone(e["category"])
+        for blank in ("   ", ""):   # 공백뿐·빈 값은 분류 없음 None 으로 통일
+            edit_expense(self.store, e["id"], category="식비")
+            edit_expense(self.store, e["id"], category=blank)
+            self.assertIsNone(e["category"], repr(blank))
+            self.assertIsNone(self.store.data["history"][-1]["after"]["category"])
+        with self.assertRaisesRegex(ValueError, "0원 이하"):   # insert 와 같이 validate 오류가 먼저
+            edit_expense(self.store, e["id"], amount=0, category=5)
         for bad in (5, True, ["식비"], 1.0):
             before = self.snapshot()
             with self.assertRaises(ValueError) as cm:
