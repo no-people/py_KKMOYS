@@ -177,12 +177,43 @@ def restore_expense(store, eid):
 
 
 def undo_last_edit(store, eid):
-    """그 지출의 가장 최근 수정(edit)을 되돌린다. 수정 이력의 바꾸기 전 값으로 돌려놓고, 되돌린 사실도 이력에 남긴다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    """그 지출의 가장 최근 수정(edit)을 되돌린다. 수정 이력의 바꾸기 전 값으로 돌려놓고, 되돌린 사실도 이력에 남긴다.
+    수정과 같은 검사(삭제된 지출 거부, 지금 날짜·되돌릴 날짜의 확정 기간, validate)를 거친다.
+    되돌리는 항목은 _EDITABLE 과 고정 풀기(category_fixed True → False)다. 다시 고정(False → True)은
+    set_category 만 하므로(규격 0장) 그런 수정(unfix_category 등)은 거부한다. 되돌려도 바뀌는 항목이 없으면
+    거부한다(같은 수정을 두 번 되돌리기 포함). deleted·recurring_id 는 그대로. 돌려주는 값: (지출, 경고 목록)."""
+    e = _live_expense(store, eid)
+    edits = [h for h in history(store, e["id"]) if h.get("action") == "edit"]
+    if not edits:
+        raise ValueError(f"되돌릴 수정이 없습니다: {e['id']}번")
+    old = edits[-1].get("before")
+    if not isinstance(old, dict) or not all(k in old for k in ("date", "payer", "amount", "members")):
+        raise ValueError(f"자료 파일의 history 형식이 잘못되었습니다: {e['id']}번 지출의 수정 이력")
+    _check_unlocked(store, e["date"], e["id"])   # 확정 기간의 지출은 되돌리지도 못하고
+    new = {k: old.get(k) for k in _EDITABLE}
+    day, won = ledger.validate(store, new["date"], new["payer"], new["amount"], new["members"], new["weights"])
+    _check_unlocked(store, day, e["id"])         # 확정 기간으로 되돌아가지도 못한다
+    dup = ledger.duplicates(store, day, new["payer"], won, exclude_id=e["id"])
+    after = dict(e, date=day, payer=new["payer"], amount=won, members=list(new["members"]),
+                 weights=dict(new["weights"]) if new["weights"] is not None else None,
+                 memo=str(new["memo"]) if new["memo"] is not None else "", category=new["category"])
+    fixed_now, fixed_then = bool(e.get("category_fixed", False)), bool(old.get("category_fixed", False))
+    if fixed_then and not fixed_now:
+        raise ValueError(f"분류 고정을 푼 수정은 되돌릴 수 없습니다: {e['id']}번 (다시 고정하려면 cat set 을 쓰십시오)")
+    after["category_fixed"] = fixed_then and fixed_now   # 키 없는 옛 지출은 고정 안 됨
+    if all(after.get(k) == e.get(k) for k in _EDITABLE) and after["category_fixed"] == fixed_now:
+        raise ValueError(f"되돌려도 바뀌는 항목이 없습니다: {e['id']}번")
+    store.record("undo", e["id"], e, after)   # 이력 먼저(실패하면 지출도 그대로)
+    e.update(after)
+    warnings = []
+    if dup:
+        ids = ", ".join(str(i) for i in dup)
+        warnings.append(f"중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 ({ids}번)")
+    return e, warnings
 
 
 def history(store, eid=None):
-    """수정·삭제 이력. eid 를 주면 그 지출의 이력만.
+    """지출 변경 이력. eid 를 주면 그 지출의 이력만.
     돌려주는 값: 기록된 순서(시간순)의 [{"id", "action", "before", "after", "at"}] 복사본.
     추가·가져오기 등 모든 action 을 담는다. 없는 지출 번호면 ValueError."""
     items = store.data.get("history")

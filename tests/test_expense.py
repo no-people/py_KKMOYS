@@ -834,5 +834,148 @@ class TestAddFromFile(StoreCase):
         self.assertEqual((len(added), errors), (40, []))
 
 
+class TestUndoLastEdit(StoreCase):
+    """undo_last_edit: 가장 최근 edit 의 before 로, 이력 undo, 수정과 같은 검사. 기본 명부: 김민수·이서연·박지훈."""
+
+    def put(self, date="2026-11-12", payer="김민수", amount=36000, members=("김민수", "이서연"), **kw):
+        from moim.common import ledger
+        return ledger.insert(self.store, date, payer, amount, list(members), **kw)
+
+    def snapshot(self):
+        d = self.store.data
+        return json.dumps([d["expenses"], d["history"], d["next_id"]], ensure_ascii=False)
+
+    def test_restores_before_and_records_undo(self):
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put(memo="저녁", category="식비")
+        orig = dict(e)
+        edit_expense(self.store, e["id"], amount=30000, memo="고침", members=["김민수", "박지훈"],
+                     weights={"김민수": 2, "박지훈": 1}, category="장소", date="2026-11-13", payer="박지훈")
+        edited = dict(e)
+        got, warnings = undo_last_edit(self.store, e["id"])
+        self.assertIs(got, e)
+        self.assertEqual((e, warnings), (orig, []))
+        h = self.store.data["history"][-1]
+        self.assertEqual((h["id"], h["action"], h["before"], h["after"]), (e["id"], "undo", edited, orig))
+        self.assertRegex(h["at"], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")
+
+    def test_latest_edit_and_twice_rejected(self):
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put()
+        edit_expense(self.store, e["id"], amount=30000)
+        edit_expense(self.store, e["id"], amount=20000)
+        undo_last_edit(self.store, e["id"])
+        self.assertEqual(e["amount"], 30000)   # 가장 최근 수정(30000 → 20000)만 되돌림
+        before = self.snapshot()
+        with self.assertRaises(ValueError) as cm:   # 같은 수정을 다시 되돌리면 바뀌는 것이 없다
+            undo_last_edit(self.store, e["id"])
+        self.assertEqual(str(cm.exception), "되돌려도 바뀌는 항목이 없습니다: 1번")
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual([h["action"] for h in self.store.data["history"]], ["add", "edit", "edit", "undo"])
+
+    def test_same_value_edit_rejected(self):
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put(memo="저녁")
+        edit_expense(self.store, e["id"], memo="저녁")   # 같은 값 수정도 edit 이력은 남는다
+        with self.assertRaisesRegex(ValueError, "바뀌는 항목이 없습니다"):
+            undo_last_edit(self.store, e["id"])
+
+    def test_keeps_state_fields(self):
+        from moim.features.categorize import set_category
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put(recurring_id=3)
+        set_category(self.store, e["id"], "식비")
+        edit_expense(self.store, e["id"], memo="고침")   # 고정된 채 수정 → 되돌려도 고정은 그대로
+        undo_last_edit(self.store, e["id"])
+        self.assertEqual((e["memo"], e["category"], e["category_fixed"], e["recurring_id"], e["deleted"]),
+                         ("", "식비", True, 3, False))
+
+    def test_undo_set_category_unfixes(self):
+        from moim.features.categorize import set_category
+        from moim.features.expenses import undo_last_edit
+        e = self.put()
+        set_category(self.store, e["id"], "식비")
+        undo_last_edit(self.store, e["id"])   # 분류 지정을 되돌리면 분류와 고정이 함께 원래대로
+        self.assertEqual((e["category"], e["category_fixed"]), (None, False))
+        h = self.store.data["history"][-1]
+        self.assertEqual((h["action"], h["before"]["category_fixed"], h["after"]["category_fixed"]), ("undo", True, False))
+
+    def test_undo_unfix_rejected(self):
+        from moim.features.categorize import set_category, unfix_category
+        from moim.features.expenses import undo_last_edit
+        e = self.put()
+        set_category(self.store, e["id"], "식비")
+        unfix_category(self.store, e["id"])
+        before = self.snapshot()
+        with self.assertRaises(ValueError) as cm:   # 다시 고정하는 것은 set_category 만(규격 0장)
+            undo_last_edit(self.store, e["id"])
+        self.assertEqual(str(cm.exception),
+                         "분류 고정을 푼 수정은 되돌릴 수 없습니다: 1번 (다시 고정하려면 cat set 을 쓰십시오)")
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(e["category_fixed"])
+
+    def test_rejected_and_nothing_changes(self):
+        from moim.features.expenses import delete_expense, edit_expense, undo_last_edit
+        plain = self.put()
+        gone = self.put(amount=1000)
+        edit_expense(self.store, gone["id"], amount=2000)
+        delete_expense(self.store, gone["id"])
+        cases = ((plain["id"], "되돌릴 수정이 없습니다: 1번"), (gone["id"], "삭제된 지출입니다: 2번"),
+                 (99, "99번 지출이 없습니다"))
+        for eid, msg in cases:
+            before = self.snapshot()
+            with self.assertRaises(ValueError) as cm:
+                undo_last_edit(self.store, eid)
+            self.assertIn(msg, str(cm.exception))
+            self.assertEqual(self.snapshot(), before, eid)
+
+    def test_locked_now_or_target(self):
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put("2026-11-30")
+        edit_expense(self.store, e["id"], date="2026-12-01")
+        cases = (({"start": "2026-11-01", "end": "2026-11-30"}, "2026-11-30"),   # 되돌아갈 날짜가 확정 기간 끝일
+                 ({"start": "2026-12-01", "end": "2026-12-31"}, "2026-12-01"))   # 지금 날짜가 확정 기간 첫날
+        for lock, day in cases:
+            self.store.data["locks"] = [lock]
+            before = self.snapshot()
+            with self.assertRaises(ValueError) as cm:
+                undo_last_edit(self.store, e["id"])
+            self.assertEqual(str(cm.exception), f"정산이 확정된 기간입니다: {day}")
+            self.assertEqual(self.snapshot(), before)
+        self.store.data["locks"] = [{"start": "2026-10-01", "end": "2026-11-29"}]   # 바로 앞날까지면 된다
+        self.assertEqual(undo_last_edit(self.store, e["id"])[0]["date"], "2026-11-30")
+
+    def test_member_period_checked_again(self):
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put("2026-11-20", members=("김민수", "박지훈"))
+        edit_expense(self.store, e["id"], members=["김민수"])
+        self.store.member("박지훈")["left"] = "2026-11-19"   # 수정한 뒤 탈퇴: 되돌리면 탈퇴 다음 날 지출이 됨
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "그날 회원이 아닙니다"):
+            undo_last_edit(self.store, e["id"])
+        self.assertEqual(self.snapshot(), before)
+        self.store.member("박지훈")["left"] = "2026-11-20"   # 탈퇴일 당일까지는 회원
+        self.assertEqual(undo_last_edit(self.store, e["id"])[0]["members"], ["김민수", "박지훈"])
+
+    def test_duplicate_warning(self):
+        from moim.features.expenses import edit_expense, undo_last_edit
+        e = self.put()
+        other = self.put(members=("이서연",))   # 같은 날·같은 사람·같은 금액
+        edit_expense(self.store, e["id"], amount=1000)
+        _, warnings = undo_last_edit(self.store, e["id"])
+        self.assertEqual(warnings, [f"중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 ({other['id']}번)"])
+
+    def test_broken_edit_history_rejected(self):
+        from moim.features.expenses import undo_last_edit
+        e = self.put()
+        for before_value in ("깨짐", None, {"amount": 1000}):
+            self.store.data["history"].append({"id": e["id"], "action": "edit", "before": before_value,
+                                               "after": dict(e), "at": "2026-11-28 10:00:00"})
+            snap = self.snapshot()
+            with self.assertRaisesRegex(ValueError, "history 형식"):
+                undo_last_edit(self.store, e["id"])
+            self.assertEqual(self.snapshot(), snap)
+
+
 if __name__ == "__main__":
     unittest.main()

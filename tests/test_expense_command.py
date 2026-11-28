@@ -1,4 +1,4 @@
-"""명령 exp — add·list·edit·delete·restore·history·import-lines. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
+"""명령 exp — add·list·edit·delete·restore·history·import-lines·undo. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
 
 import copy
 import os
@@ -351,11 +351,55 @@ class TestExpenseCommand(StoreCase):
         self.assertEqual(code, 1)
         self.assertIn("파일이 없습니다", err.getvalue())
 
+    # --- undo
+    def test_undo(self):
+        self.add("2026-11-12", "김민수", "36,000", "김민수;이서연", "--memo", "저녁")
+        self.cmd("edit", "1", "--amount", "30000", "--weights", "김민수=2;이서연=1")
+        changed, lines = self.cmd("undo", "1")
+        self.assertTrue(changed)
+        self.assertEqual(lines, ["지출 되돌림 1번 (가장 최근 수정 이전으로)",
+                                 "  금액: 30,000원 → 36,000원",
+                                 "  비율: 김민수=2;이서연=1 → 없음(똑같이 나눔)"])
+        self.assertEqual([h["action"] for h in self.store.data["history"]], ["add", "edit", "undo"])
+
+    def test_undo_rejected(self):
+        self.add()
+        with self.assertRaisesRegex(ValueError, "되돌릴 수정이 없습니다: 1번"):
+            self.cmd("undo", "1")
+        self.assertEqual([h["action"] for h in self.store.data["history"]], ["add"])
+
+    def test_history_undo_import_recurring_weights_labels(self):
+        from moim.common import ledger
+        self.add("2026-11-12", "김민수", "36000", "김민수;이서연")
+        self.cmd("edit", "1", "--weights", "김민수=2;이서연=1")
+        self.cmd("undo", "1")
+        ledger.insert(self.store, "2026-11-13", "이서연", 5000, ["이서연"], action="import")
+        ledger.insert(self.store, "2026-11-14", "박지훈", 7000, ["박지훈"], recurring_id=1, action="recurring")
+        rows = self.cmd("history")[1][0].splitlines()
+        self.assertIn("수정      비율: 없음(똑같이 나눔) → 김민수=2;이서연=1", rows[3])
+        self.assertIn("되돌림    비율: 김민수=2;이서연=1 → 없음(똑같이 나눔)", rows[4])
+        self.assertIn("가져오기  새 지출: 2026-11-13 이서연 5,000원 (1명)", rows[5])
+        self.assertIn("반복      새 지출: 2026-11-14 박지훈 7,000원 (1명)", rows[6])
+
+    def test_history_broken_values_show_dash(self):
+        self.add()
+        for before, after in (({"weights": [1]}, {"weights": {"김민수": 1}}),
+                              ({"members": 5}, {"members": ["김민수"]}),
+                              ({"amount": "abc"}, {"amount": 1000})):
+            self.store.data["history"].append({"id": 1, "action": "edit", "at": "2026-11-28 10:00:00",
+                                               "before": before, "after": after})
+        changed, lines = self.cmd("history", "1")   # 트레이스백 없이 표 전체가 나온다
+        rows = lines[0].splitlines()
+        self.assertEqual(len(rows), 6)
+        self.assertIn("비율: - → 김민수=1", rows[3])
+        self.assertIn("참여자: - → 김민수", rows[4])
+        self.assertIn("금액: - → 1,000원", rows[5])
+
     # --- 하위 명령 없음
     def test_no_subcommand(self):
         changed, lines = self.cmd()
         self.assertFalse(changed)
-        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore, history, import-lines"))
+        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore, history, import-lines, undo"))
 
 
 if __name__ == "__main__":

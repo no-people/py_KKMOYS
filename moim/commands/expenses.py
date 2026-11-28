@@ -53,11 +53,14 @@ def add_parser(sub, period_args):
         s = grp.add_parser(name, help=h)
         s.add_argument("eid", type=int, help="지출 번호")
 
-    s = grp.add_parser("history", help="수정·삭제 이력(번호를 주면 그 지출만)")
+    s = grp.add_parser("history", help="지출 변경 이력(번호를 주면 그 지출만)")
     s.add_argument("eid", type=int, nargs="?", help="지출 번호")
 
     s = grp.add_parser("import-lines", help="파일의 여러 줄을 한꺼번에 입력(UTF-8)")
     s.add_argument("path", help="한 줄 형식: 날짜,낸 사람,금액,참여자1;참여자2,메모 ('#' 줄·빈 줄 건너뜀)")
+
+    s = grp.add_parser("undo", help="그 지출의 가장 최근 수정 되돌리기")
+    s.add_argument("eid", type=int, help="지출 번호")
     return grp
 
 
@@ -132,7 +135,12 @@ def _edit(args, store, out):
         changes["weights"] = None
     before = copy.deepcopy(store.get_expense(args.eid))
     e, warnings = expenses.edit_expense(store, args.eid, **changes)
-    out(f"지출 수정 {e['id']}번")
+    _report(out, f"지출 수정 {e['id']}번", before, e, warnings)
+
+
+def _report(out, title, before, e, warnings):
+    """수정·되돌리기 결과: 바뀐 항목을 "전 → 후" 로, 그다음 경고."""
+    out(title)
     # 화면에 보이는 값으로 비교한다(옛 자료의 memo 없음(None)과 "" 은 같은 "-")
     diffs = [(label, _show(key, before.get(key)), _show(key, e.get(key))) for key, label in _FIELDS]
     diffs = [d for d in diffs if d[1] != d[2]]
@@ -142,6 +150,12 @@ def _edit(args, store, out):
         out("  바뀐 항목 없음")
     for w in warnings:
         out(f"경고: {w}")
+
+
+def _undo(args, store, out):
+    before = copy.deepcopy(store.get_expense(args.eid))
+    e, warnings = expenses.undo_last_edit(store, args.eid)
+    _report(out, f"지출 되돌림 {e['id']}번 (가장 최근 수정 이전으로)", before, e, warnings)
 
 
 def _changes(h):
@@ -154,10 +168,20 @@ def _changes(h):
             return f"새 지출: {_summary(after)}"
         except (KeyError, TypeError):   # 손으로 고친 자료 파일: 표 전체를 막지 않는다
             return "-"
-    diffs = [f"{label}: {_show(key, before.get(key))} → {_show(key, after.get(key))}"
-             for key, label in _FIELDS + _STATE_FIELDS
-             if _show(key, before.get(key)) != _show(key, after.get(key))]
+    diffs = []
+    for key, label in _FIELDS + _STATE_FIELDS:
+        old, new = _safe_show(key, before.get(key)), _safe_show(key, after.get(key))
+        if old != new:
+            diffs.append(f"{label}: {old} → {new}")
     return "; ".join(diffs) or "바뀐 항목 없음"
+
+
+def _safe_show(key, value):
+    """손으로 고친 자료의 깨진 값(비율이 목록, 금액이 글자 등)은 "-" 로: 표 전체를 막지 않는다."""
+    try:
+        return _show(key, value)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return "-"
 
 
 def _history(args, store, out):
@@ -213,8 +237,11 @@ def run(c, args, cfg, store, out):
         return False
     if c == "import-lines":
         return _import_lines(args, store, out)
+    if c == "undo":
+        _undo(args, store, out)
+        return True
     if c is None:
-        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, history, import-lines (도움말: python -m moim {GROUP} -h)")
+        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, history, import-lines, undo (도움말: python -m moim {GROUP} -h)")
         return False
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c}")
     return False
