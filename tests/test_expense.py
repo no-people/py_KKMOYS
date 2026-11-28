@@ -740,6 +740,100 @@ class TestHistoryQuery(StoreCase):
                     self.ex.history(self.store, eid)
 
 
+class TestAddFromFile(StoreCase):
+    """add_from_file·import_lines: 줄 형식, 건너뛰는 줄, 잘못된 줄 모으기, add_expense 와 같은 검사·경고."""
+
+    def write(self, text, name="lines.csv", encoding="utf-8"):
+        p = self.path(name)
+        with open(p, "w", encoding=encoding, newline="") as f:
+            f.write(text)
+        return p
+
+    def test_adds_lines_and_skips_comment_blank(self):
+        from moim.features.expenses import add_from_file
+        p = self.write("# 날짜,낸 사람,금액,참여자,메모\n"
+                       "2026-11-12,김민수,36000,김민수;이서연;박지훈,회의 후 저녁\n"
+                       "\n   \n  # 들여 쓴 주석\n"
+                       '2026-11-13, 이서연 ,"9,000", 이서연 ; 박지훈 ,"간식, 음료"\n'
+                       "2026-11-14,박지훈,5000,박지훈\n")   # 메모 칸 없음
+        added, errors = add_from_file(self.store, p)
+        self.assertEqual((added, errors), ([1, 2, 3], []))
+        e1, e2, e3 = self.store.data["expenses"]
+        self.assertEqual((e1["members"], e1["memo"], e1["amount"]), (["김민수", "이서연", "박지훈"], "회의 후 저녁", 36000))
+        self.assertEqual((e2["payer"], e2["members"], e2["amount"], e2["memo"]),
+                         ("이서연", ["이서연", "박지훈"], 9000, "간식, 음료"))
+        self.assertEqual((e3["memo"], e3["deleted"], e3["weights"]), ("", False, None))
+        self.assertEqual([h["action"] for h in self.store.data["history"]], ["add"] * 3)
+
+    def test_bad_lines_collected_rest_added(self):
+        from moim.features.expenses import add_from_file
+        self.store.data["locks"] = [{"start": "2026-10-01", "end": "2026-10-31"}]
+        p = self.write("2026-11-12,김민수,36000,김민수;이서연\n"      # 1 정상
+                       "2026-11-31,김민수,1000,김민수\n"              # 2 없는 날짜
+                       "2026-11-12,김민수,0,김민수\n"                 # 3 금액 0
+                       "2026-11-12,최유진,1000,김민수\n"              # 4 명부에 없음
+                       "2026-11-12,김민수,1000\n"                     # 5 칸 부족
+                       "2026-11-12,김민수,1000,김민수,메모,더\n"      # 6 칸 많음
+                       "2026-10-31,김민수,1000,김민수\n"              # 7 확정 기간 끝일
+                       "2026-11-12,김민수,1000,;\n"                   # 8 참여자 없음
+                       "2026-08-31,김민수,1000,김민수\n"              # 9 가입 전날
+                       "2026-11-01,이서연,2000,이서연\n")             # 10 정상(확정 기간 다음 날)
+        added, errors = add_from_file(self.store, p)
+        self.assertEqual(added, [1, 2])
+        self.assertEqual([no for no, _ in errors], [2, 3, 4, 5, 6, 7, 8, 9])
+        self.assertTrue(all(isinstance(msg, str) and msg for _, msg in errors))
+        self.assertIn("칸 수가 3개", dict(errors)[5])
+        self.assertIn("칸 수가 6개", dict(errors)[6])
+        self.assertEqual(dict(errors)[7], "정산이 확정된 기간입니다: 2026-10-31")
+        self.assertEqual(len(self.store.data["expenses"]), 2)
+        self.assertEqual(len(self.store.data["history"]), 2)
+
+    def test_duplicate_warning_same_as_add_expense(self):
+        from moim.features.expenses import add_expense, import_lines
+        add_expense(self.store, "2026-11-12", "김민수", 36000, ["김민수"])
+        p = self.write("2026-11-12,김민수,36000,김민수;이서연\n"
+                       "# 주석\n"
+                       "2026-11-12,김민수,36,000,김민수\n"           # 따옴표 없는 쉼표 금액: 칸 수 오류
+                       "2026-11-12,김민수,36000,이서연\n")
+        added, errors, warnings = import_lines(self.store, p)
+        self.assertEqual(added, [2, 3])   # 지출 번호(줄 번호 아님)
+        self.assertEqual([no for no, _ in errors], [3])
+        self.assertEqual(warnings, [(1, "중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 (1번)"),
+                                    (4, "중복 의심: 같은 날·같은 사람·같은 금액 지출이 있습니다 (1, 2번)")])
+
+    def test_bom_empty_file_and_errors_propagate(self):
+        from moim.features.expenses import add_from_file
+        p = self.write("\ufeff2026-11-12,김민수,1000,김민수\n")
+        self.assertEqual(add_from_file(self.store, p), ([1], []))
+        self.assertEqual(add_from_file(self.store, self.write("", "empty.csv")), ([], []))
+        with self.assertRaises(FileNotFoundError):
+            add_from_file(self.store, self.path("없음.csv"))
+        with self.assertRaises(UnicodeDecodeError):   # CP949 파일: 한 줄도 넣지 않는다
+            add_from_file(self.store, self.write("2026-11-13,김민수,1000,김민수\n", "cp.csv", "cp949"))
+        self.assertEqual(len(self.store.data["expenses"]), 1)
+
+    def test_line_numbers_follow_newlines_only(self):
+        from moim.features.expenses import add_from_file
+        p = self.write("2026-11-12,김민수,1000,김민수,메모\u2028이어짐\r\n"   # 줄 안의 특수 줄바꿈 글자는 메모
+                       "2026-11-31,김민수,1000,김민수\r\n"
+                       "2026-11-13,김민수,2000,김민수")                     # 마지막 줄바꿈 없음
+        added, errors = add_from_file(self.store, p)
+        self.assertEqual((added, [no for no, _ in errors]), ([1, 2], [2]))
+        self.assertEqual(self.store.data["expenses"][0]["memo"], "메모\u2028이어짐")
+
+    def test_gen_data_expenses_csv(self):
+        import subprocess
+        from moim.features.expenses import add_from_file
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        out = self.path("sample")
+        subprocess.run([sys.executable, os.path.join(root, "tools", "gen_data.py"), out, "--month", "2026-11", "--seed", "1"],
+                       check=True, stdout=subprocess.DEVNULL)
+        self.store.data["members"] = [{"name": n, "joined": "2026-11-01", "left": None}
+                                      for n in ["김민수", "이서연", "박지훈", "최유진", "정하늘", "한도윤"]]
+        added, errors = add_from_file(self.store, os.path.join(out, "expenses.csv"))
+        self.assertEqual((len(added), errors), (40, []))
+
+
 class TestUndoLastEdit(StoreCase):
     """undo_last_edit: 가장 최근 edit 의 before 로, 이력 undo, 수정과 같은 검사. 기본 명부: 김민수·이서연·박지훈."""
 

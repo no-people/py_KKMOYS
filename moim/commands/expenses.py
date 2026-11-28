@@ -56,6 +56,9 @@ def add_parser(sub, period_args):
     s = grp.add_parser("history", help="지출 변경 이력(번호를 주면 그 지출만)")
     s.add_argument("eid", type=int, nargs="?", help="지출 번호")
 
+    s = grp.add_parser("import-lines", help="파일의 여러 줄을 한꺼번에 입력(UTF-8)")
+    s.add_argument("path", help="한 줄 형식: 날짜,낸 사람,금액,참여자1;참여자2,메모 ('#' 줄·빈 줄 건너뜀)")
+
     s = grp.add_parser("undo", help="그 지출의 가장 최근 수정 되돌리기")
     s.add_argument("eid", type=int, help="지출 번호")
     return grp
@@ -192,6 +195,20 @@ def _history(args, store, out):
     out(f"모두 {len(items)}건")
 
 
+def _import_lines(args, store, out):
+    added, errors, warnings = expenses.import_lines(store, args.path)
+    if len(added) > 1 and added == list(range(added[0], added[-1] + 1)):
+        ids = f" ({added[0]}~{added[-1]}번)"
+    else:
+        ids = f" ({', '.join(map(str, added))}번)" if added else ""
+    out(f"지출 여러 줄 입력: {len(added)}건 추가{ids}, 잘못된 줄 {len(errors)}개")
+    for no, msg in errors:
+        out(f"  {no}번째 줄 건너뜀: {msg}")
+    for no, msg in warnings:
+        out(f"경고: {no}번째 줄: {msg}")
+    return bool(added)
+
+
 def run(c, args, cfg, store, out):
     if c == "add":
         e, warnings = expenses.add_expense(store, args.date, args.payer, args.amount, _members(args.members),
@@ -218,11 +235,13 @@ def run(c, args, cfg, store, out):
     if c == "history":
         _history(args, store, out)
         return False
+    if c == "import-lines":
+        return _import_lines(args, store, out)
     if c == "undo":
         _undo(args, store, out)
         return True
     if c is None:
-        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, history, undo (도움말: python -m moim {GROUP} -h)")
+        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, history, import-lines, undo (도움말: python -m moim {GROUP} -h)")
         return False
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c}")
     return False
