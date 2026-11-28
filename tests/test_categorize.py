@@ -235,6 +235,32 @@ class ClassifyTest(unittest.TestCase):
         categorize.add_rule(self.rules, "교통", ["저녁"], priority=1)
         self.assertEqual(categorize.classify(_expense(1, "저녁"), self.rules), "교통")
 
+    def test_priority_not_registration_order(self):
+        # 우선순위가 높은 규칙을 먼저 등록해도 나중 등록해도 결과는 같다
+        rules = []
+        categorize.add_rule(rules, "교통", ["저녁"], priority=1)
+        categorize.add_rule(rules, "식비", ["저녁"])
+        self.assertEqual(categorize.classify(_expense(1, "저녁"), rules), "교통")
+
+    def test_first_among_highest(self):
+        # 가장 높은 우선순위끼리 같으면 그중 먼저 등록한 규칙(맨 앞의 낮은 규칙이 아님)
+        categorize.add_rule(self.rules, "교통", ["저녁"], priority=2)
+        categorize.add_rule(self.rules, "물품", ["저녁"], priority=2)
+        self.assertEqual(categorize.classify(_expense(1, "저녁"), self.rules), "교통")
+
+    def test_negative_and_missing_priority(self):
+        # 음수 우선순위는 기본값 0 보다 낮고, 손으로 고친 규칙에 priority 가 없으면 0 으로 본다
+        rules = [{"category": "교통", "keywords": ["저녁"], "priority": -1},
+                 {"category": "물품", "keywords": ["저녁"]}]
+        self.assertEqual(categorize.classify(_expense(1, "저녁"), rules), "물품")
+
+    def test_keyword_ignores_case(self):
+        # 키워드의 영문 대소문자는 구분하지 않는다(#68 의견 4)
+        categorize.add_rule(self.rules, "교통", ["Taxi"])
+        for memo in ("TAXI 귀가", "taxi", "Taxi"):
+            with self.subTest(memo=memo):
+                self.assertEqual(categorize.classify(_expense(1, memo), self.rules), "교통")
+
     def test_no_match_is_none(self):
         for memo in ("현수막", ""):
             with self.subTest(memo=memo):
