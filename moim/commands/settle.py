@@ -6,7 +6,7 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 """
 
 from ..common import money, textfmt
-from ..common.cliutil import _period
+from ..common.cliutil import _members, _period
 from ..features import settle
 
 GROUP = 'settle'
@@ -22,6 +22,15 @@ def add_parser(sub, period_args):
     period_args(transfers)
     lock = grp.add_parser("lock", help="정산 확정(잔액 합이 0일 때만). 확정 기간의 지출은 추가·수정·삭제할 수 없다")
     period_args(lock)
+    radd = grp.add_parser("recurring-add", help="반복 지출 등록(매달 같은 날. 그달에 없는 날은 말일)")
+    radd.add_argument("day", type=int, help="매달 날짜 1~31")
+    radd.add_argument("payer", help="낸 사람")
+    radd.add_argument("amount", help="금액(원). 쉼표 가능")
+    radd.add_argument("members", help='참여자. 예: "김민수;이서연"')
+    radd.add_argument("--memo", default="", help="메모")
+    radd.add_argument("--start", required=True, help="이 달부터 만든다 YYYY-MM")
+    rrun = grp.add_parser("recurring-run", help="이 날짜까지 아직 만들지 않은 반복 지출을 지출로 만든다")
+    rrun.add_argument("--until", required=True, help="YYYY-MM-DD (이날까지 포함)")
     return grp
 
 
@@ -46,6 +55,19 @@ def transfers_lines(transfers):
     return [f"{frm} -> {to} {money.fmt(won)}원" for frm, to, won in transfers]
 
 
+def _memo(text):
+    return f" {text}" if text else ""
+
+
+def recurring_lines(created, skipped):
+    """run_recurring_report 결과를 화면 줄 목록으로."""
+    lines = [f"반복 지출 만듦 {e['id']}번: {e['date']} {e['payer']} {money.fmt(e['amount'])}원 "
+             f"({len(e['members'])}명){_memo(e['memo'])} (반복 {e['recurring_id']}번)" for e in created]
+    lines += [f"건너뜀: 반복 {rid}번 {month} ({reason})" for rid, month, reason in skipped]
+    lines.append(f"반복 지출 {len(created)}건을 만들었습니다" if created else "새로 만들 반복 지출이 없습니다")
+    return lines
+
+
 def run(c, args, cfg, store, out):
     if c == "balance":
         start, end = _period(args)
@@ -66,4 +88,14 @@ def run(c, args, cfg, store, out):
             return False
         out(f"정산 확정: {lock['start']} ~ {lock['end']} (이 기간의 지출은 추가·수정·삭제·되살리기를 할 수 없고, 다른 날짜의 지출을 이 기간으로 옮길 수도 없습니다)")
         return True
+    if c == "recurring-add":
+        r = settle.add_recurring(store, args.day, args.payer, args.amount, _members(args.members), args.memo, args.start)
+        out(f"반복 지출 등록 {r['id']}번: 매달 {r['day']}일 {r['payer']} {money.fmt(r['amount'])}원 "
+            f"({len(r['members'])}명){_memo(r['memo'])}, {r['start']}부터 (그달에 없는 날은 말일, settle recurring-run 으로 만듦)")
+        return True
+    if c == "recurring-run":
+        created, skipped = settle.run_recurring_report(store, args.until)
+        for line in recurring_lines(created, skipped):
+            out(line)
+        return bool(created)
     raise ValueError(f"모르는 정산 명령입니다: {c}")
