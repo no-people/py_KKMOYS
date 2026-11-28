@@ -118,12 +118,45 @@ def import_csv(store, path, mapping=None, encoding=None, preview=False):
     raise NotImplementedError("이 함수를 구현한다")
 
 
+def _count_snapshot(data):
+    members = data.get("members", [])
+    expenses = [e for e in data.get("expenses", []) if not e.get("deleted")]
+    return len(members), len(expenses)
+
+
 def backup_all(store, path):
-    raise NotImplementedError("이 함수를 구현한다")
+    """전체 모임 자료를 지정한 JSON 파일로 백업한다. 돌려주는 값: (회원 수, 유효 지출 수)"""
+    snapshot = copy.deepcopy(store.data)
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(snapshot, f, ensure_ascii=False, indent=2)
+    return _count_snapshot(snapshot)
 
 
 def restore_all(store, path):
-    raise NotImplementedError("이 함수를 구현한다")
+    """백업 JSON 파일에서 전체 모임 자료를 복원한다. 돌려주는 값: (회원 수, 유효 지출 수)"""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"백업 파일이 없습니다: {path}")
+    try:
+        with open(path, encoding="utf-8") as f:
+            loaded = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"백업 파일 형식이 잘못되었습니다: {path} ({exc.lineno}번째 줄)") from exc
+
+    if not isinstance(loaded, dict):
+        raise ValueError(f"백업 파일 형식이 잘못되었습니다: {path}")
+    if not isinstance(loaded.get("members"), list) or not isinstance(loaded.get("expenses"), list):
+        raise ValueError(f"백업 파일에 회원 또는 지출 목록이 없습니다: {path}")
+
+    if os.path.exists(store.path):
+        store.save()
+
+    restored = copy.deepcopy(loaded)
+    store.data.clear()
+    store.data.update(restored)
+    return _count_snapshot(store.data)
 
 
 def merge(store, other_path):

@@ -5,6 +5,8 @@ run 은 자료를 바꿨으면 True 를 돌려준다(통합 실행 틀이 그때
 인자 해석은 common/cliutil.py 의 _members(참여자), _weights(비율), _period(기간)를 쓴다.
 """
 
+from datetime import datetime
+import os
 from ..common import money
 from ..common.cliutil import _period
 from ..features import transfer_io
@@ -38,6 +40,12 @@ def add_parser(sub, period_args):
     p_ver.add_argument("path", help="검증할 CSV 또는 JSON 파일 경로")
     _add_filter_args(p_ver, period_args)
 
+    p_bak = grp.add_parser("backup", help="전체 자료 백업")
+    p_bak.add_argument("path", nargs="?", default=None, help="저장할 백업 파일 경로 (생략 시 backup_dir 에 자동 생성)")
+
+    p_res = grp.add_parser("restore", help="백업 파일에서 전체 자료 복원")
+    p_res.add_argument("path", help="복원할 백업 파일 경로")
+
     return grp
 
 
@@ -66,6 +74,21 @@ def run(c, args, cfg, store, out):
         status = "일치" if ok else "불일치"
         out(f"검증 {status}: 파일 {money.fmt(file_sum)}원 / 기록 {money.fmt(record_sum)}원")
         return False
+
+    if c == "backup":
+        target = args.path
+        if not target:
+            backup_dir = cfg.get("backup_dir") or os.path.join(os.path.dirname(os.path.abspath(store.path)), "backup")
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            target = os.path.join(backup_dir, f"full-backup-{stamp}.json")
+        m_cnt, e_cnt = transfer_io.backup_all(store, target)
+        out(f"전체 백업 완료: 회원 {m_cnt}명, 지출 {e_cnt}건 -> {target}")
+        return False
+
+    if c == "restore":
+        m_cnt, e_cnt = transfer_io.restore_all(store, args.path)
+        out(f"전체 복원 완료: 회원 {m_cnt}명, 지출 {e_cnt}건 <- {args.path}")
+        return True
 
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
     return False
