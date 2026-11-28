@@ -18,6 +18,8 @@ def add_parser(sub, period_args):
     grp = sub.add_parser(GROUP, help="정산").add_subparsers(dest="cmd", required=True)
     balance = grp.add_parser("balance", help="기간의 사람별 낸 돈·부담·송금·잔액과 잔액 합계 검사")
     period_args(balance)
+    transfers = grp.add_parser("transfers", help="잔액을 맞추는 송금 목록(횟수를 줄인 '누가 누구에게 얼마')")
+    period_args(transfers)
     return grp
 
 
@@ -35,10 +37,22 @@ def balance_lines(rows):
     return lines
 
 
+def transfers_lines(transfers):
+    """minimal_transfers 결과를 화면 줄 목록으로. 스켈레톤 PDF 8절 송금 목록 화면과 같은 모양."""
+    if not transfers:
+        return ["보낼 송금이 없습니다"]
+    return [f"{frm} -> {to} {money.fmt(won)}원" for frm, to, won in transfers]
+
+
 def run(c, args, cfg, store, out):
     if c == "balance":
         start, end = _period(args)
         for line in balance_lines(settle.balances(store, start, end)):
+            out(line)
+        return False
+    if c == "transfers":
+        start, end = _period(args)
+        for line in transfers_lines(settle.minimal_transfers(settle.balances(store, start, end))):
             out(line)
         return False
     raise ValueError(f"모르는 정산 명령입니다: {c}")
