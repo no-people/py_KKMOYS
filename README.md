@@ -57,28 +57,39 @@ Copy-Item config.example.json config.json
 나머지 경로 항목의 자동 변환과 백업·로그 연결은 각 담당 작업이 병합된 뒤 사용할 수 있습니다.
 예산을 바꾸려면 `config.json`의 `budget` 안에 있는 `monthly` 값을 수정합니다.
 
-### 처음 설정 만들기: 아직 없음
+### 처음 설정 만들기: `init`
 
 <!-- 함수: init -->
 
-설정 파일(`config.json`)을 기본값으로 만듭니다.
+설정 파일을 기본값으로 만듭니다. 이미 있는 파일은 덮어쓰지 않습니다.
+설정 파일이 없을 때 아래 명령을 실행합니다. 앞에서 예제 설정을 복사했다면 다시 만들 필요가 없습니다.
 
 **명령 사용**
 
 ```powershell
-(하위 명령 아직 없음)
+python -m moim init
 ```
 
 **출력 예**
 
 ```text
+설정 파일을 만들었습니다: config.json
+모임에 맞게 채울 항목: treasurer(총무), budget.monthly(월 예산), dues.monthly(월 회비)
+자료 파일(data)은 처음 자료를 저장할 때 만들어집니다
 ```
 
 **오류 예**
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim init` | `오류: 이미 있습니다: config.json` |
+| `python -m moim --config 없는폴더/config.json init` | `오류: 설정 파일을 만들 폴더가 없습니다: 없는폴더` |
+
+**참고**
+
+- 첫 번째 오류 예는 `config.json`이 이미 있는 경우이며, 두 번째는 지정한 폴더가 없는 경우입니다. 모두 종료 코드 1이고 기존 설정은 유지합니다.
+- 다른 이름으로 만들려면 `python -m moim --config 연습.json init`을 실행합니다. `--config`는 `init` 앞에 둡니다.
+- 만든 설정의 `treasurer`, `budget.monthly`, `dues.monthly`를 모임에 맞게 채운 뒤 사용합니다. `init`은 자료 파일이나 회원 명부를 만들지 않습니다.
 
 ## 명령 도움말
 
