@@ -393,6 +393,34 @@ class TestManageExpense(StoreCase):
                 edit_expense(self.store, eid, **changes)
             self.assertEqual(self.snapshot(), before, (eid, changes))
 
+    def test_edit_category_strip_none_and_reject(self):
+        from moim.features.expenses import edit_expense
+        e = self.put(category="식비")
+        edit_expense(self.store, e["id"], category="  장소 ")
+        self.assertEqual((e["category"], self.store.data["history"][-1]["after"]["category"]), ("장소", "장소"))
+        edit_expense(self.store, e["id"], category=None)
+        self.assertIsNone(e["category"])
+        for blank in ("   ", ""):   # 공백뿐·빈 값은 분류 없음 None 으로 통일
+            edit_expense(self.store, e["id"], category="식비")
+            edit_expense(self.store, e["id"], category=blank)
+            self.assertIsNone(e["category"], repr(blank))
+            self.assertIsNone(self.store.data["history"][-1]["after"]["category"])
+        with self.assertRaisesRegex(ValueError, "0원 이하"):   # insert 와 같이 validate 오류가 먼저
+            edit_expense(self.store, e["id"], amount=0, category=5)
+        for bad in (5, True, ["식비"], 1.0):
+            before = self.snapshot()
+            with self.assertRaises(ValueError) as cm:
+                edit_expense(self.store, e["id"], category=bad)
+            self.assertEqual(str(cm.exception), f"분류는 문자열이어야 합니다: {bad!r}")
+            self.assertEqual(self.snapshot(), before, repr(bad))
+
+    def test_edit_other_field_keeps_old_category(self):
+        from moim.features.expenses import edit_expense
+        e = self.put(category="식비")
+        e["category"] = 7   # 손으로 고친 옛 자료: 분류를 바꾸지 않으면 검사하지 않고 그대로 둔다
+        edit_expense(self.store, e["id"], memo="고침")
+        self.assertEqual((e["category"], e["memo"]), (7, "고침"))
+
     def test_edit_payer_not_in_members_ok(self):
         from moim.features.expenses import edit_expense
         e = self.put()
