@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import unittest
 from unittest import mock
 
@@ -10,6 +11,7 @@ from helpers import StoreCase
 
 from moim import cli
 from moim.commands import expenses
+from moim.common import config
 
 
 class CliErrorTest(StoreCase):
@@ -150,6 +152,96 @@ class CliErrorTest(StoreCase):
         with mock.patch.object(expenses, "run", side_effect=KeyError("amount")):
             with self.assertRaises(KeyError):
                 self.call("exp")
+
+
+class InitTest(StoreCase):
+    """`init`: 기본 설정 파일(config.DEFAULT)을 --config 경로에 만든다. 이미 있으면 덮어쓰지 않는다."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = self.path("config.json")
+
+    def call(self, *argv):
+        lines, err = [], io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = cli.main(["--config", self.config, *argv], out=lines.append)
+        return code, lines, err.getvalue()
+
+    def test_creates_default_config(self):
+        code, lines, err = self.call("init")
+        self.assertEqual((code, err), (0, ""))
+        with open(self.config, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), config.DEFAULT)
+        self.assertEqual(lines, [f"설정 파일을 만들었습니다: {self.config}",
+                                 "모임에 맞게 채울 항목: treasurer(총무), budget.monthly(월 예산), dues.monthly(월 회비)",
+                                 "자료 파일(data)은 처음 자료를 저장할 때 만들어집니다"])
+
+    def test_does_not_create_data_file(self):
+        self.assertEqual(self.call("init")[0], 0)
+        self.assertFalse(os.path.exists(self.path("data.json")))
+
+    def test_existing_config_not_overwritten(self):
+        with open(self.config, "w", encoding="utf-8") as f:
+            f.write('{"group": "AI 동아리"}')
+        code, lines, err = self.call("init")
+        self.assertEqual((code, lines), (1, []))
+        self.assertEqual(err, f"오류: 이미 있습니다: {self.config}\n")
+        with open(self.config, encoding="utf-8") as f:
+            self.assertEqual(f.read(), '{"group": "AI 동아리"}')
+
+    def test_broken_existing_config_not_read(self):
+        # init 은 설정 파일을 읽지 않는다: 깨진 파일이 있어도 형식 오류가 아니라 "이미 있습니다" 로 거부
+        with open(self.config, "w", encoding="utf-8") as f:
+            f.write("{")
+        code, _, err = self.call("init")
+        self.assertEqual((code, err), (1, f"오류: 이미 있습니다: {self.config}\n"))
+
+    def test_missing_folder(self):
+        folder = os.path.join(self.dir, "없는폴더")
+        self.config = os.path.join(folder, "config.json")
+        code, lines, err = self.call("init")
+        self.assertEqual((code, lines), (1, []))
+        self.assertEqual(err, f"오류: 설정 파일을 만들 폴더가 없습니다: {folder}\n")
+        self.assertFalse(os.path.exists(folder))
+
+    def test_folder_given_as_config(self):
+        # 폴더 자체를 --config 로 주면 덮어쓰지 않고 "이미 있습니다"
+        self.config = self.dir
+        code, _, err = self.call("init")
+        self.assertEqual((code, err), (1, f"오류: 이미 있습니다: {self.dir}\n"))
+
+    def test_config_after_init_is_usage_error(self):
+        # --config 는 맨 앞 옵션: init 뒤에 쓰면 형식 오류이고 파일을 만들지 않는다
+        other = self.path("other.json")
+        code, _, err = self.call("init", "--config", other)
+        self.assertEqual(code, 1)
+        self.assertTrue(err.startswith("오류: 명령 형식이 잘못되었습니다: "), err)
+        self.assertIn("--config", err)
+        self.assertFalse(os.path.exists(other))
+        self.assertFalse(os.path.exists(self.config))
+
+    def test_created_config_works(self):
+        # 만든 설정을 config.load 가 그대로 읽고, 그 설정으로 다른 명령이 돈다
+        self.assertEqual(self.call("init")[0], 0)
+        self.assertEqual(config.load(self.config)["data"], self.path("data.json"))
+        code, _, err = self.call("exp", "list")
+        self.assertEqual((code, err), (0, ""))
+
+    def test_default_config_path(self):
+        # --config 를 안 주면 현재 폴더의 config.json
+        cwd = os.getcwd()
+        os.chdir(self.dir)
+        try:
+            self.assertEqual(cli.main(["init"], out=[].append), 0)
+        finally:
+            os.chdir(cwd)
+        self.assertTrue(os.path.exists(self.config))
+
+    def test_init_in_help(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            cli.main(["-h"])
+        self.assertIn("python -m moim --config <경로> init", " ".join(out.getvalue().split()))   # 도움말 줄바꿈 무시
 
 
 if __name__ == "__main__":
