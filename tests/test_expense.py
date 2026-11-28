@@ -751,12 +751,21 @@ class TestAddFromFile(StoreCase):
             add_from_file(self.store, self.write("2026-11-13,김민수,1000,김민수\n", "cp.csv", "cp949"))
         self.assertEqual(len(self.store.data["expenses"]), 1)
 
+    def test_line_numbers_follow_newlines_only(self):
+        from moim.features.expenses import add_from_file
+        p = self.write("2026-11-12,김민수,1000,김민수,메모\u2028이어짐\r\n"   # 줄 안의 특수 줄바꿈 글자는 메모
+                       "2026-11-31,김민수,1000,김민수\r\n"
+                       "2026-11-13,김민수,2000,김민수")                     # 마지막 줄바꿈 없음
+        added, errors = add_from_file(self.store, p)
+        self.assertEqual((added, [no for no, _ in errors]), ([1, 2], [2]))
+        self.assertEqual(self.store.data["expenses"][0]["memo"], "메모\u2028이어짐")
+
     def test_gen_data_expenses_csv(self):
         import subprocess
         from moim.features.expenses import add_from_file
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         out = self.path("sample")
-        subprocess.run([sys.executable, os.path.join(root, "tools", "gen_data.py"), out, "--month", "2026-11"],
+        subprocess.run([sys.executable, os.path.join(root, "tools", "gen_data.py"), out, "--month", "2026-11", "--seed", "1"],
                        check=True, stdout=subprocess.DEVNULL)
         self.store.data["members"] = [{"name": n, "joined": "2026-11-01", "left": None}
                                       for n in ["김민수", "이서연", "박지훈", "최유진", "정하늘", "한도윤"]]

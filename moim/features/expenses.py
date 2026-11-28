@@ -204,8 +204,10 @@ def import_lines(store, path):
     줄마다 add_expense 를 그대로 써서 검사·확정 기간·중복 경고가 한 건 추가와 같다.
     잘못된 줄은 건너뛰고 모은다. 나머지 줄은 추가한다. 파일을 못 열거나 UTF-8 이 아니면 그 오류를 그대로 낸다.
     돌려주는 값: (추가한 번호 목록, [(줄 번호, 오류)], [(줄 번호, 경고)])"""
-    with open(path, encoding="utf-8-sig", newline="") as f:   # 메모장이 붙이는 BOM 은 뗀다
-        lines = f.read().splitlines()   # 다 읽은 뒤 추가한다: 읽다가 인코딩 오류가 나면 하나도 안 들어감
+    with open(path, encoding="utf-8-sig") as f:   # 메모장이 붙이는 BOM 은 뗀다. \r\n·\r 은 \n 으로 읽힌다
+        # 다 읽은 뒤 추가한다: 읽다가 인코딩 오류가 나면 하나도 안 들어감.
+        # splitlines 는 \u2028 등에서도 나눠 메모가 잘리고 줄 번호가 밀리므로 \n 에서만 나눈다.
+        lines = f.read().split("\n")
     added, errors, warnings = [], [], []
     for no, line in enumerate(lines, 1):
         if not line.strip() or line.lstrip().startswith("#"):
