@@ -658,7 +658,7 @@ python -m moim budget status --month 2026-11
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget status --month 2026-13` | `오류: 실제 있는 달이어야 합니다(YYYY-MM): '2026-13'` |
 
 **참고**
 
@@ -687,7 +687,7 @@ python -m moim budget pay --date 2026-11-02 --member "이서연" --amount "20,00
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget pay --date 2026-11-02 --member 없는사람 --amount 20000` | `오류: 명부에 없는 회원입니다: 없는사람` |
 
 **참고**
 
@@ -716,7 +716,7 @@ python -m moim budget balance
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget balance --until 2026-11-31` | `오류: 날짜가 잘못되었습니다(YYYY-MM-DD, 실제 있는 날짜): 2026-11-31` |
 
 **참고**
 
@@ -746,7 +746,7 @@ python -m moim budget categories --month 2026-11
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget categories --month 2026-13` | `오류: 실제 있는 달이어야 합니다(YYYY-MM): '2026-13'` |
 
 **참고**
 
@@ -777,7 +777,7 @@ python -m moim budget forecast --month 2026-11 --today 2026-11-15
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget forecast --month 2026-11 --today 2026-12-01` | `오류: 예측 기준일은 선택한 달 안의 날짜여야 합니다` |
 
 **참고**
 
@@ -812,7 +812,7 @@ python -m moim budget table --month 2026-11
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget table --month 2026-13` | `오류: 실제 있는 달이어야 합니다(YYYY-MM): '2026-13'` |
 
 **참고**
 
@@ -844,7 +844,7 @@ python -m moim budget unpaid --month 2026-11
 
 | 입력 | 출력 |
 |---|---|
-| | |
+| `python -m moim budget unpaid --month 2026-13` | `오류: 실제 있는 달이어야 합니다(YYYY-MM): '2026-13'` |
 
 **참고**
 
