@@ -828,6 +828,109 @@ class MinimalTransfersTest(StoreCase):
         self.assertEqual(repr(self.store.data), before)
 
 
+class LockPeriodTest(StoreCase):
+    """settle.lock_period 와 명령 settle lock. 공고문 기능 4 확장 필수 "정산 확정", 규약 6."""
+
+    KIM, LEE, PARK = "김민수", "이서연", "박지훈"
+
+    def _add(self, date, payer, amount):
+        self.store.data["expenses"].append({
+            "id": self.store.new_id(), "date": date, "payer": payer, "amount": amount,
+            "members": [self.KIM, self.LEE, self.PARK], "weights": None, "category": None,
+            "memo": "", "deleted": False, "recurring_id": None})
+
+    def test_lock_adds_period_ends_included(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        self.assertEqual(settle.lock_period(self.store, "2026-11-01", "2026-11-30"),
+                         {"start": "2026-11-01", "end": "2026-11-30"})
+        self.assertEqual(self.store.data["locks"], [{"start": "2026-11-01", "end": "2026-11-30"}])
+        self.assertTrue(queries.is_locked(self.store, "2026-11-01"))
+        self.assertTrue(queries.is_locked(self.store, "2026-11-30"))
+        self.assertFalse(queries.is_locked(self.store, "2026-10-31"))
+        self.assertFalse(queries.is_locked(self.store, "2026-12-01"))
+
+    def test_insert_blocked_after_lock(self):
+        # 규약 6: 확정 뒤에는 그 기간에 지출을 넣을 수 없다(기간 밖은 됨)
+        settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+        with self.assertRaisesRegex(ValueError, "정산이 확정된 기간"):
+            ledger.insert(self.store, "2026-11-30", self.KIM, 1000, [self.KIM, self.LEE])
+        ledger.insert(self.store, "2026-12-01", self.KIM, 1000, [self.KIM, self.LEE])
+
+    def test_nonzero_sum_refused(self):
+        # 규약 6: 잔액 합이 0 이 아니면 확정하지 않고 locks 도 그대로
+        rows = {self.KIM: {"paid": 100, "owed": 0, "sent": 0, "received": 0, "balance": 100}}
+        with mock.patch.object(settle, "balances", return_value=rows):
+            with self.assertRaisesRegex(ValueError, "잔액 합이 0이 아니라 확정할 수 없습니다: 100원"):
+                settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(self.store.data["locks"], [])
+
+    def test_overlap_allowed(self):
+        # 겹쳐도 확정된다(잔액 합 0 일 때). 겹친 날·새로 든 날 모두 막힌다
+        settle.lock_period(self.store, "2026-11-01", "2026-11-15")
+        settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(self.store.data["locks"], [{"start": "2026-11-01", "end": "2026-11-15"},
+                                                    {"start": "2026-11-01", "end": "2026-11-30"}])
+        self.assertTrue(queries.is_locked(self.store, "2026-11-30"))
+        self.assertFalse(queries.is_locked(self.store, "2026-12-01"))
+
+    def test_same_period_twice_no_error_no_duplicate(self):
+        first = settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(settle.lock_period(self.store, dt.date(2026, 11, 1), "2026-11-30"), first)
+        self.assertEqual(self.store.data["locks"], [first])
+
+    def test_single_day(self):
+        settle.lock_period(self.store, "2026-11-15", "2026-11-15")
+        self.assertTrue(queries.is_locked(self.store, "2026-11-15"))
+        self.assertFalse(queries.is_locked(self.store, "2026-11-16"))
+
+    def test_bad_period_raises(self):
+        with self.assertRaisesRegex(ValueError, "시작일이 끝일보다 늦음"):
+            settle.lock_period(self.store, "2026-11-30", "2026-11-01")
+        with self.assertRaises(ValueError):
+            settle.lock_period(self.store, "2026-11-31", "2026-12-01")
+        self.assertEqual(self.store.data["locks"], [])
+
+    def test_date_objects_stored_as_strings(self):
+        lock = settle.lock_period(self.store, dt.date(2028, 2, 1), dt.date(2028, 2, 29))
+        self.assertEqual(lock, {"start": "2028-02-01", "end": "2028-02-29"})
+
+    def test_old_locks_null_or_missing(self):
+        self.store.data["locks"] = None
+        settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+        self.assertEqual(self.store.data["locks"], [{"start": "2026-11-01", "end": "2026-11-30"}])
+        del self.store.data["locks"]
+        settle.lock_period(self.store, "2026-12-01", "2026-12-31")
+        self.assertEqual(self.store.data["locks"], [{"start": "2026-12-01", "end": "2026-12-31"}])
+
+    def test_broken_locks_refused(self):
+        self.store.data["locks"] = {"start": "2026-10-01"}
+        with self.assertRaisesRegex(ValueError, "locks 형식"):
+            settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+        self.store.data["locks"] = [{"start": "2026-10-01"}]
+        with self.assertRaisesRegex(ValueError, "1번째 확정 기간"):
+            settle.lock_period(self.store, "2026-11-01", "2026-11-30")
+
+    def call(self, *argv):
+        lines = []
+        args = cli.build_parser().parse_args(["settle", *argv])
+        changed = cli.run(args, self.cfg, self.store, lines.append)
+        return changed, lines
+
+    def test_command_lock(self):
+        self._add("2026-11-12", self.KIM, 9000)
+        changed, lines = self.call("lock", "--month", "2026-11")
+        self.assertTrue(changed)   # 자료를 바꿨으므로 cli 가 저장한다
+        self.assertEqual(lines, ["정산 확정: 2026-11-01 ~ 2026-11-30 (이 기간의 지출은 추가·수정·삭제·되살리기를 할 수 없고, "
+                                 "다른 날짜의 지출을 이 기간으로 옮길 수도 없습니다)"])
+        changed, lines = self.call("lock", "--month", "2026-11")   # 같은 기간 다시: 바뀐 것 없음 → 저장 안 함
+        self.assertFalse(changed)
+        self.assertEqual(lines, ["이미 확정된 기간입니다: 2026-11-01 ~ 2026-11-30"])
+        changed, _ = self.call("lock", "--start", "2026-11-15", "--end", "2026-12-15")   # 겹쳐도 됨
+        self.assertTrue(changed)
+        with self.assertRaisesRegex(ValueError, "기간을 지정"):
+            self.call("lock")
+
+
 class TransfersFormatTest(StoreCase):
     """자료 항목 transfers: [{"date", "from", "to", "amount"}]. 공통모듈_함수규격.md "EMPTY 에 새로 추가할 최상위 항목"."""
 

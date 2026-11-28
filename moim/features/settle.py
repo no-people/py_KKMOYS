@@ -129,8 +129,26 @@ def record_transfer(store, date, frm, to, amount):
 
 
 def lock_period(store, start, end):
-    """정산을 확정한다. 이 기간의 지출은 더 이상 추가·수정·삭제할 수 없다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    """정산을 확정한다. 이 기간의 지출은 더 이상 추가·수정·삭제할 수 없다.
+
+    규약 6: 잔액 합이 0 이 아니면 확정하지 않는다(ValueError). 확정 기간은 양 끝 포함으로
+    store.data["locks"] 에 {"start", "end"}("YYYY-MM-DD")를 더하고, 확정 뒤에는 queries.is_locked 가 막는다.
+    이미 확정된 기간과 겹쳐도 된다(겹친 날은 이미 막혀 있으므로). 같은 기간이 이미 있으면 다시 더하지 않는다.
+    시작일 > 끝일이면 ValueError. 돌려주는 값: 확정 기간(dict). 저장은 하지 않는다.
+    """
+    start, end = dates.parse(start), dates.parse(end)
+    if start > end:
+        raise ValueError(f"기간이 잘못되었습니다(시작일이 끝일보다 늦음): {dates.fmt(start)} ~ {dates.fmt(end)}")
+    is_locked(store, start)   # 이미 있는 locks 의 형식을 검사한다(목록 아님·깨진 항목이면 ValueError)
+    locks = store.data.get("locks") or []
+    lock = {"start": dates.fmt(start), "end": dates.fmt(end)}
+    if any(dates.parse(x["start"]) == start and dates.parse(x["end"]) == end for x in locks):
+        return lock   # 같은 기간을 다시 확정해도 오류 없이 그대로
+    total = balance_sum(balances(store, start, end))
+    if total != 0:
+        raise ValueError(f"잔액 합이 0이 아니라 확정할 수 없습니다: {money.fmt(total)}원")
+    store.data["locks"] = locks + [lock]
+    return lock
 
 
 def statement(store, start, end, person):
