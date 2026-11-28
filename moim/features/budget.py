@@ -177,7 +177,14 @@ def budget_table(store, cfg, month):
 
 def suggest_budget(store, month):
     """다음 달 예산 제안: 그달을 포함한 최근 3개월 지출 평균(천 원 단위 올림)."""
-    raise NotImplementedError("이 함수를 구현한다")
+    start, end = _month_period(month)
+    first_ym = dates.prev_month(*dates.prev_month(start.year, start.month))
+    if first_ym[0] < 1:
+        raise ValueError("최근 3개월을 계산하려면 0001-03 이후의 기준월이 필요합니다")
+    first, _ = dates.month_range(*first_ym)
+    total = period_total(store, first, end)
+    # ceil((total / 3) / 1000) * 1000: 평균을 먼저 반올림하지 않는다.
+    return ((total + 2999) // 3000) * 1000
 
 BANK_COLUMNS = ["거래일자", "거래시각", "적요", "출금액", "입금액", "잔액"]
 
