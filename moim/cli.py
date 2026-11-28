@@ -3,16 +3,20 @@
 지금 하는 일: 명령 묶음(moim/commands/*.py)을 붙이고, 설정을 읽고, 자료를 읽어 실행한 뒤 바뀌었으면 저장한다.
 오류(ValueError·파일 오류·미구현)는 "오류: 이유" 한 줄로 표준 오류에 안내하고 종료 코드 1 을 돌려준다.
 `init` 은 기본 설정 파일(--config 경로)을 만든다. 설정·자료 파일을 읽지 않는다.
-더할 일: 로그 남기기, 자료 파일이 깨졌을 때 복구 안내.
+로그(설정의 log_dir/YYYY-MM-DD.log): 자료를 바꾼 명령은 저장한 뒤 화면에 낸 줄을 INFO 로, 설정을 읽은 뒤 난 오류는 ERROR 로 남긴다.
+조회만 한 명령은 남기지 않는다. 로그를 못 남겨도 명령 결과는 그대로 두고 경고만 한다.
+더할 일: 자료 파일이 깨졌을 때 복구 안내.
 """
 
 import argparse
 import json
+import logging
 import os
 import sys
 
 from .commands import budget, categorize, expenses, members, report, settle, transfer_io
 from .common import config as cfgmod
+from .common import log
 from .common.store import Store
 
 COMMANDS = [members, expenses, categorize, report, settle, budget, transfer_io]
@@ -93,8 +97,46 @@ def init(path, out=print):
     out("자료 파일(data)은 처음 자료를 저장할 때 만들어집니다")
 
 
+def command_name(args):
+    """로그에 적을 명령 이름. 예: "exp add", "settle balance"."""
+    return " ".join(x for x in (args.group, getattr(args, "cmd", None)) if x)
+
+
+def _raise_write_error(record):
+    """logging 은 쓰기 오류를 handleError 로 삼키고 트레이스백을 찍는다. 대신 그 오류를 그대로 올린다."""
+    raise   # emit 의 except 안에서 불리므로 처리 중인 오류가 다시 올라간다
+
+
+def write_log(cfg, level, lines, warn=True):
+    """cfg["log_dir"] 의 오늘 로그 파일에 줄들을 남긴다. 실패해도 명령 결과(종료 코드)는 바꾸지 않는다.
+
+    폴더·파일 열기와 쓰기 실패 모두 warn 이면 "경고: 로그를 남기지 못했습니다: 이유" 한 줄, 아니면 아무것도 내지 않는다
+    (명령 오류 때는 "오류: 이유" 한 줄만 보이게).
+    """
+    handlers = []
+    try:
+        logger = log.get_logger(cfg["log_dir"])
+        handlers = list(logger.handlers)
+        for h in handlers:
+            h.handleError = _raise_write_error
+        for line in lines:
+            logger.log(level, " ".join(str(line).split()))   # 여러 줄(표)도 한 줄로
+    except (OSError, ValueError) as exc:   # ValueError: 닫힌 파일에 쓰기 등
+        if warn:
+            print(f"경고: 로그를 남기지 못했습니다: {error_reason(exc)}", file=sys.stderr)
+    finally:
+        for h in handlers:
+            h.__dict__.pop("handleError", None)   # 다음 사용을 위해 원래 handleError 로 되돌림
+
+
 def main(argv=None, out=print):
     """실행 결과 종료 코드: 성공 0, 오류 1. 오류는 표준 오류에 "오류: 이유" 한 줄로 알리고 저장하지 않는다."""
+    cfg, shown = None, []
+
+    def show(line):
+        shown.append(line)
+        out(line)
+
     try:
         args = build_parser().parse_args(argv)
         if args.group == INIT:
@@ -102,9 +144,15 @@ def main(argv=None, out=print):
             return 0
         cfg = load_json_file(cfgmod.load, args.config, "설정 파일")
         store = load_json_file(lambda p: Store(p).load(), cfg["data"], "자료 파일")
-        if run(args, cfg, store, out):
+        changed = run(args, cfg, store, show)
+        if changed:
             store.save()
     except (ValueError, OSError, NotImplementedError) as exc:
-        print(f"오류: {error_reason(exc)}", file=sys.stderr)
+        reason = error_reason(exc)
+        print(f"오류: {reason}", file=sys.stderr)
+        if cfg is not None:   # 설정을 못 읽었으면 로그 폴더도 모른다
+            write_log(cfg, logging.ERROR, [f"{command_name(args)} 실패: {reason}"], warn=False)
         return 1
+    if changed:   # 저장이 끝난 뒤에만: 저장 안 된 변경이 로그에만 남지 않게
+        write_log(cfg, logging.INFO, shown or [f"{command_name(args)} 저장"])
     return 0
