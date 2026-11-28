@@ -48,6 +48,9 @@ def add_parser(sub, period_args):
     for name, h in (("delete", "지출 삭제(삭제 표시만)"), ("restore", "삭제한 지출 되살리기")):
         s = grp.add_parser(name, help=h)
         s.add_argument("eid", type=int, help="지출 번호")
+
+    s = grp.add_parser("import-lines", help="파일의 여러 줄을 한꺼번에 입력(UTF-8)")
+    s.add_argument("path", help="한 줄 형식: 날짜,낸 사람,금액,참여자1;참여자2,메모 ('#' 줄·빈 줄 건너뜀)")
     return grp
 
 
@@ -130,6 +133,20 @@ def _edit(args, store, out):
         out(f"경고: {w}")
 
 
+def _import_lines(args, store, out):
+    added, errors, warnings = expenses.import_lines(store, args.path)
+    if len(added) > 1 and added == list(range(added[0], added[-1] + 1)):
+        ids = f" ({added[0]}~{added[-1]}번)"
+    else:
+        ids = f" ({', '.join(map(str, added))}번)" if added else ""
+    out(f"지출 여러 줄 입력: {len(added)}건 추가{ids}, 잘못된 줄 {len(errors)}개")
+    for no, msg in errors:
+        out(f"  {no}번째 줄 건너뜀: {msg}")
+    for no, msg in warnings:
+        out(f"경고: {no}번째 줄: {msg}")
+    return bool(added)
+
+
 def run(c, args, cfg, store, out):
     if c == "add":
         e, warnings = expenses.add_expense(store, args.date, args.payer, args.amount, _members(args.members),
@@ -153,8 +170,10 @@ def run(c, args, cfg, store, out):
         e = expenses.restore_expense(store, args.eid)
         out(f"지출 되살림 {e['id']}번: {_summary(e)}")
         return True
+    if c == "import-lines":
+        return _import_lines(args, store, out)
     if c is None:
-        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore (도움말: python -m moim {GROUP} -h)")
+        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, import-lines (도움말: python -m moim {GROUP} -h)")
         return False
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c}")
     return False
