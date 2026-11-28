@@ -70,10 +70,21 @@ def duplicates(store, date, payer, amount, exclude_id=None):
 
 
 
+def _clean_category(category):
+    """분류는 str 또는 None(규격 0장·4-3). 앞뒤 공백은 떼고, 비면(""·공백뿐) 분류 없음 None 으로 통일한다.
+    그 밖의 값은 ValueError."""
+    if category is None:
+        return None
+    if not isinstance(category, str):
+        raise ValueError(f"분류는 문자열이어야 합니다: {category!r}")
+    return category.strip() or None
+
+
 def insert(store, date, payer, amount, members, memo="", weights=None, category=None,
            recurring_id=None, action="add"):
     """검사 후 지출을 저장한다. 확정 기간이면 거부한다. 돌려주는 값: 새 지출(dict). 담당: 기능 1"""
     day, won = validate(store, date, payer, amount, members, weights)
+    category = _clean_category(category)   # 번호를 받기 전에 거부: 실패하면 아무것도 바뀌지 않음
     if is_locked(store, day):
         raise ValueError(f"정산이 확정된 기간입니다: {day}")
     e = {

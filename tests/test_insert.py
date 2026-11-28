@@ -150,5 +150,28 @@ class TestRejected(InsertCase):
         self.assertEqual(len(self.store.data["expenses"]), 1)
 
 
+class TestCategory(InsertCase):
+    """분류는 str 또는 None(규격 0장·4-3). 앞뒤 공백을 떼고, 그 밖의 값은 아무것도 바꾸지 않고 거부."""
+
+    def test_strip_and_none(self):
+        cases = ((" 식비 ", "식비"), ("\t장소\n", "장소"), ("식비", "식비"), (None, None), ("", None), ("   ", None), ("\t\n", None))
+        for given, stored in cases:
+            e = insert(self.store, "2026-11-12", KIM, 1000, [KIM], category=given)
+            self.assertEqual(e["category"], stored, repr(given))
+            self.assertEqual(self.store.data["history"][-1]["after"]["category"], stored)
+
+    def test_non_str_rejected_adds_nothing(self):
+        for bad in (5, 0, 1.5, True, False, ["식비"], {"식비": 1}, b"food"):
+            with self.assertRaises(ValueError) as cm:
+                insert(self.store, "2026-11-12", KIM, 1000, [KIM], category=bad)
+            self.assertEqual(str(cm.exception), f"분류는 문자열이어야 합니다: {bad!r}")
+            self.assert_nothing_added()
+
+    def test_validate_error_comes_first(self):
+        with self.assertRaisesRegex(ValueError, "0원 이하 지출은 받지 않습니다"):
+            insert(self.store, "2026-11-12", KIM, 0, [KIM], category=5)
+        self.assert_nothing_added()
+
+
 if __name__ == "__main__":
     unittest.main()

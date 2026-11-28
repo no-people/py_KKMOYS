@@ -99,6 +99,15 @@ _ORDERS = {
 _EDITABLE = ("date", "payer", "amount", "members", "memo", "weights", "category")
 
 
+def _clean_category(category):
+    """분류는 str 또는 None(규격 0장). 앞뒤 공백은 뗀다. 그 밖의 값은 ValueError."""
+    if category is None:
+        return None
+    if not isinstance(category, str):
+        raise ValueError(f"분류는 문자열이어야 합니다: {category!r}")
+    return category.strip()
+
+
 def _check_unlocked(store, day, eid):
     """확정 기간이면 거부한다. 날짜·locks 가 깨져 is_locked 가 ValueError 를 내도 잠기지 않은 것으로 넘기지 않는다."""
     try:
@@ -135,6 +144,8 @@ def edit_expense(store, eid, **changes):
     _check_unlocked(store, e["date"], e["id"])   # 규약 6: 확정 기간의 지출은 못 고치고
     new = {k: e.get(k) for k in _EDITABLE}
     new.update(changes)
+    if "category" in changes:   # ledger.insert 와 같은 규칙: str 또는 None, 앞뒤 공백 뗌
+        new["category"] = _clean_category(changes["category"])
     day, won = ledger.validate(store, new["date"], new["payer"], new["amount"], new["members"], new["weights"])
     _check_unlocked(store, day, e["id"])         # 다른 날짜의 지출을 확정 기간으로 옮기지도 못한다
     dup = ledger.duplicates(store, day, new["payer"], won, exclude_id=e["id"])
