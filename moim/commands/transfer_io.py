@@ -23,6 +23,24 @@ def _resolve_period(args):
     return None, None
 
 
+def _parse_mapping(raw_map):
+    if not raw_map:
+        return None
+    mapping = {}
+    for pair in raw_map.split(","):
+        token = pair.strip()
+        if not token:
+            continue
+        if "=" not in token:
+            raise ValueError(f"열 연결 형식이 잘못되었습니다(원본열=필드명): {token}")
+        src, dst = token.split("=", 1)
+        src, dst = src.strip(), dst.strip()
+        if not src or not dst:
+            raise ValueError(f"열 연결 형식이 잘못되었습니다: {token}")
+        mapping[src] = dst
+    return mapping or None
+
+
 def add_parser(sub, period_args):
     grp = sub.add_parser(GROUP, help="가져오기·내보내기").add_subparsers(dest="cmd")
 
@@ -37,6 +55,12 @@ def add_parser(sub, period_args):
     p_ver = grp.add_parser("verify", help="내보낸 파일 합계 검증")
     p_ver.add_argument("path", help="검증할 CSV 또는 JSON 파일 경로")
     _add_filter_args(p_ver, period_args)
+
+    p_imp = grp.add_parser("import-csv", help="CSV 파일에서 지출 가져오기")
+    p_imp.add_argument("path", help="가져올 CSV 파일 경로")
+    p_imp.add_argument("--map", dest="mapping", default=None, help="열 이름 연결 (예: 지출일=date,결제자=payer,금액=amount)")
+    p_imp.add_argument("--encoding", default=None, help="파일 글자 인코딩 (utf-8-sig 또는 cp949)")
+    p_imp.add_argument("--preview", action="store_true", help="실제로 넣지 않고 미리 보기만 실행")
 
     return grp
 
@@ -66,6 +90,26 @@ def run(c, args, cfg, store, out):
         status = "일치" if ok else "불일치"
         out(f"검증 {status}: 파일 {money.fmt(file_sum)}원 / 기록 {money.fmt(record_sum)}원")
         return False
+
+    if c == "import-csv":
+        mapping = _parse_mapping(args.mapping)
+        res = transfer_io.import_csv(
+            store,
+            args.path,
+            mapping=mapping,
+            encoding=args.encoding,
+            preview=args.preview,
+        )
+        prefix = "(미리 보기) " if args.preview else ""
+        out(
+            f"{prefix}CSV 가져오기({res['encoding']}): "
+            f"추가 {len(res['added'])}건, 중복 {len(res['duplicates'])}건, 오류 {len(res['errors'])}건"
+        )
+        if res["duplicates"]:
+            out(f"중복 줄 번호: {', '.join(str(n) for n in res['duplicates'])}")
+        for lineno, msg in res["errors"]:
+            out(f"{lineno}번째 줄 오류: {msg}")
+        return (not args.preview) and bool(res["added"])
 
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c or ''}".rstrip())
     return False

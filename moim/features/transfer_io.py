@@ -17,8 +17,10 @@ import os
 from ..common import dates, ledger, money  # noqa: F401
 from ..common.csvio import detect_encoding, read_csv_rows  # noqa: F401
 from ..common.queries import active_members, category_of, expenses_in  # noqa: F401
+from ..common.rules import UNCATEGORIZED
 
 EXPORT_FIELDS = ("id", "date", "payer", "amount", "category", "members", "weights", "memo")
+IMPORT_REQUIRED_FIELDS = ("date", "payer", "amount")
 
 
 def _select_expenses(store, start=None, end=None, category=None):
@@ -112,10 +114,120 @@ def roundtrip_check(store, path, start=None, end=None, category=None):
     raise NotImplementedError("이 함수를 구현한다")
 
 
+def _parse_members_and_weights(raw_members, raw_weights, active_set):
+    if raw_members:
+        members = [m.strip() for m in raw_members.split(",") if m.strip()]
+        if not members:
+            raise ValueError("참여자가 비어 있습니다")
+        if len(set(members)) != len(members):
+            raise ValueError("참여자에 중복된 이름이 있습니다")
+        inactive = [m for m in members if m not in active_set]
+        if inactive:
+            raise ValueError(f"그날 활동 회원이 아닌 참여자가 있습니다: {', '.join(inactive)}")
+    else:
+        members = sorted(active_set)
+        if not members:
+            raise ValueError("그날 활동 중인 회원이 없습니다")
+
+    if not raw_weights:
+        return members, None
+
+    weights = {}
+    for token in raw_weights.split(","):
+        part = token.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            raise ValueError(f"비율 형식이 잘못되었습니다: {part}")
+        name, raw_ratio = part.split(":", 1)
+        name = name.strip()
+        try:
+            ratio = int(raw_ratio.strip())
+        except ValueError as exc:
+            raise ValueError(f"비율은 정수여야 합니다: {part}") from exc
+        if ratio <= 0:
+            raise ValueError(f"비율은 1 이상이어야 합니다: {part}")
+        if name in weights:
+            raise ValueError(f"비율에 중복된 이름이 있습니다: {name}")
+        weights[name] = ratio
+
+    if set(weights) != set(members):
+        raise ValueError("비율에 적은 사람과 참여자가 다릅니다")
+    return members, weights
+
+
 def import_csv(store, path, mapping=None, encoding=None, preview=False):
     """CSV 지출을 가져온다. 돌려주는 값: {"encoding", "added": [번호], "duplicates": [줄 번호], "errors": [(줄 번호, 오류)]}
     preview=True 면 실제로 넣지 않고 검사만 한다. 이때 added 에는 들어갈 줄 번호가 담긴다."""
-    raise NotImplementedError("이 함수를 구현한다")
+    enc, rows = read_csv_rows(path, mapping=mapping, encoding=encoding)
+    if rows:
+        _, sample = next(iter(rows))
+        missing = [req for req in IMPORT_REQUIRED_FIELDS if req not in sample]
+        if missing:
+            raise ValueError(f"필수 열이 없습니다: {', '.join(missing)}")
+
+    added = []
+    duplicates = []
+    errors = []
+    seen_keys = set()
+
+    for lineno, row in rows:
+        try:
+            day = dates.fmt(dates.parse(row.get("date", "")))
+            payer = (row.get("payer") or "").strip()
+            if not payer:
+                raise ValueError("낸 사람(payer)이 비어 있습니다")
+            won = money.to_won(row.get("amount", ""))
+            if won <= 0:
+                raise ValueError("금액은 1원 이상이어야 합니다")
+
+            if ledger.is_locked(store, day):
+                raise ValueError(f"확정된 기간의 날짜입니다: {day}")
+
+            active = active_members(store, day)
+            active_set = set(active)
+            if payer not in active_set:
+                raise ValueError(f"그날 활동 회원이 아닙니다: {payer}")
+
+            raw_category = (row.get("category") or "").strip()
+            category = raw_category if raw_category else UNCATEGORIZED
+            members, weights = _parse_members_and_weights(
+                (row.get("members") or "").strip(),
+                (row.get("weights") or "").strip(),
+                active_set,
+            )
+            memo = (row.get("memo") or "").strip()
+
+            dup_key = (day, payer, won)
+            if dup_key in seen_keys or ledger.duplicates(store, day, payer, won):
+                duplicates.append(lineno)
+                continue
+            seen_keys.add(dup_key)
+
+            if preview:
+                added.append(lineno)
+            else:
+                eid = ledger.insert(
+                    store,
+                    day,
+                    payer,
+                    won,
+                    members,
+                    category=category,
+                    weights=weights,
+                    memo=memo,
+                    action="import",
+                )
+                added.append(eid["id"])
+        except ValueError as exc:
+            errors.append((lineno, str(exc)))
+
+    return {
+        "encoding": enc,
+        "added": added,
+        "duplicates": duplicates,
+        "errors": errors,
+    }
 
 
 def backup_all(store, path):
