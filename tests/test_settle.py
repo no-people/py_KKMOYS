@@ -765,7 +765,7 @@ class MinimalTransfersTest(StoreCase):
             rows = self.rows(**{f"p{i}": v for i, v in enumerate(vals)})
             transfers = settle.minimal_transfers(rows)
             self.assertLessEqual(len(transfers), max(n - 1, 0))
-            self.assertTrue(all(v == 0 for v in self.settle_all(rows, transfers).values()))
+            self.assertEqual(self.settle_all(rows, transfers), {name: 0 for name in rows})   # 실패하면 남은 잔액이 보인다
 
     def test_no_transfer_when_all_zero_or_empty(self):
         self.assertEqual(settle.minimal_transfers(self.rows(김민수=0, 이서연=0)), [])
