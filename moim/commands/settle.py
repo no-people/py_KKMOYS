@@ -20,6 +20,8 @@ def add_parser(sub, period_args):
     period_args(balance)
     transfers = grp.add_parser("transfers", help="잔액을 맞추는 송금 목록(횟수를 줄인 '누가 누구에게 얼마')")
     period_args(transfers)
+    lock = grp.add_parser("lock", help="정산 확정(잔액 합이 0일 때만). 확정 기간의 지출은 추가·수정·삭제할 수 없다")
+    period_args(lock)
     return grp
 
 
@@ -55,4 +57,13 @@ def run(c, args, cfg, store, out):
         for line in transfers_lines(settle.minimal_transfers(settle.balances(store, start, end))):
             out(line)
         return False
+    if c == "lock":
+        start, end = _period(args)
+        before = len(store.data.get("locks") or [])
+        lock = settle.lock_period(store, start, end)
+        if len(store.data.get("locks") or []) == before:   # 같은 기간이 이미 확정돼 있음 → 바뀐 것 없음
+            out(f"이미 확정된 기간입니다: {lock['start']} ~ {lock['end']}")
+            return False
+        out(f"정산 확정: {lock['start']} ~ {lock['end']} (이 기간의 지출은 추가·수정·삭제·되살리기를 할 수 없고, 다른 날짜의 지출을 이 기간으로 옮길 수도 없습니다)")
+        return True
     raise ValueError(f"모르는 정산 명령입니다: {c}")
