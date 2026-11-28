@@ -162,7 +162,7 @@ def unpaid(store, cfg, month):
 
 def dues_deduction(store, cfg, month):
     """회비를 덜 낸 사람에게 정산에서 차감할 금액. {이름: 모자란 회비}"""
-    raise NotImplementedError("이 함수를 구현한다")
+    return {name: missing for name, _, missing in unpaid(store, cfg, month)}
 
 
 def budget_table(store, cfg, month):

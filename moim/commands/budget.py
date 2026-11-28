@@ -35,6 +35,8 @@ def add_parser(sub, period_args):
     bank.add_argument("--treasurer", help="출금을 기록할 총무 이름(기본값: 설정 파일)")
     unpaid = grp.add_parser("unpaid", help="그달 1일 또는 말일 회원의 회비 미납 목록")
     unpaid.add_argument("--month", required=True, help="YYYY-MM")
+    deduction = grp.add_parser("deduction", help="정산에 반영할 월별 회비 부족액 조회")
+    deduction.add_argument("--month", required=True, help="YYYY-MM")
     return grp
 
 
@@ -92,5 +94,12 @@ def run(c, args, cfg, store, out):
             out(f"{name}: 납부 {money.fmt(paid)}원, 미납 {money.fmt(missing)}원")
         if not rows:
             out("미납자가 없습니다.")
+        return False
+    if c == "deduction":
+        amounts = budget.dues_deduction(store, cfg, args.month)
+        for name, amount in amounts.items():
+            out(f"{name}: 회비 차감 예정액 {money.fmt(amount)}원")
+        if not amounts:
+            out("회비 차감 대상이 없습니다.")
         return False
     raise ValueError(f"모르는 예산·회비 명령입니다: {c}")
