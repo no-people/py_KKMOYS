@@ -1,5 +1,6 @@
 """기능 4 정산 테스트. 공통 함수 queries.is_locked 와 자료 항목 locks 포함."""
 
+import argparse
 import datetime as dt
 import json
 from unittest import mock
@@ -957,3 +958,147 @@ class TransfersFormatTest(StoreCase):
         with open(self.path("old.json"), "w", encoding="utf-8") as f:
             json.dump({"members": [], "expenses": [], "next_id": 1, "transfers": [t]}, f)
         self.assertEqual(Store(self.path("old.json")).load().data["transfers"], [t])
+
+
+class RecurringTest(StoreCase):
+    """settle.add_recurring·run_recurring 과 명령 settle recurring-add·recurring-run. 공고문 기능 4 확장 필수 "반복 지출"."""
+
+    KIM, LEE, PARK = "김민수", "이서연", "박지훈"
+    ALL = [KIM, LEE, PARK]
+
+    def add(self, day=31, start="2026-11", amount=300000, members=None, memo="정기 대관료"):
+        return settle.add_recurring(self.store, day, self.KIM, amount, members or self.ALL, memo, start)
+
+    def made(self, until):
+        return [(e["date"], e["recurring_id"]) for e in settle.run_recurring(self.store, until)]
+
+    def test_add_format(self):
+        # 규격 recurring 행: id 는 반복 지출끼리 1부터, start 는 두 자리 월, category None, made 빈 목록
+        r = self.add(start="2026-9", amount="300,000")
+        self.assertEqual(r, {"id": 1, "day": 31, "payer": self.KIM, "amount": 300000, "members": self.ALL,
+                             "memo": "정기 대관료", "category": None, "start": "2026-09", "made": []})
+        self.assertEqual(self.store.data["recurring"], [r])
+        self.assertEqual(self.add()["id"], 2)
+        self.assertEqual(self.add(start=(2026, 11))["start"], "2026-11")   # 규격 0장: (연, 월) 튜플도
+        self.assertEqual(self.store.data["expenses"], [])   # 등록만 하고 지출은 만들지 않는다
+
+    def test_add_rejects(self):
+        for day in (0, 32, True, "5", None):
+            with self.assertRaisesRegex(ValueError, "반복 날짜는 1~31 정수"):
+                self.add(day=day)
+        for start in ("2026-13", (2026, 13), (2026, "11"), (True, 1)):
+            with self.assertRaisesRegex(ValueError, "달 형식"):
+                self.add(start=start)
+        with self.assertRaisesRegex(ValueError, "0원 이하"):
+            self.add(amount=0)
+        with self.assertRaisesRegex(ValueError, "명부에 없는 사람"):
+            self.add(members=[self.KIM, "없는사람"])
+        with self.assertRaisesRegex(ValueError, "그날 회원이 아닙니다"):
+            self.add(start="2026-08")   # 가입일 2026-09-01 전(첫 달 8/31 기준)
+        self.assertEqual(self.store.data["recurring"], [])
+
+    def test_run_month_end_and_leap_year(self):
+        # 그달에 없는 날은 말일(30일 달·2월·윤년 2028-02-29), 양 끝 달 포함
+        self.add(day=31, start="2027-11")
+        self.assertEqual(self.made("2028-03-31"), [("2027-11-30", 1), ("2027-12-31", 1), ("2028-01-31", 1),
+                                                   ("2028-02-29", 1), ("2028-03-31", 1)])
+
+    def test_run_creates_expense_via_insert(self):
+        self.add()
+        [e] = settle.run_recurring(self.store, "2026-11-30")
+        self.assertEqual((e["date"], e["amount"], e["members"], e["memo"], e["weights"], e["category"]),
+                         ("2026-11-30", 300000, self.ALL, "정기 대관료", None, None))
+        self.assertEqual(e["recurring_id"], 1)
+        self.assertEqual(self.store.data["history"][-1]["action"], "recurring")   # 규격 4-3 action
+        self.assertEqual(self.store.data["recurring"][0]["made"], ["2026-11"])
+
+    def test_made_month_not_again(self):
+        self.add()
+        self.made("2026-12-31")
+        self.assertEqual(self.made("2026-12-31"), [])
+        self.assertEqual(self.made("2027-01-31"), [("2027-01-31", 1)])
+        self.assertEqual(len(self.store.data["expenses"]), 3)
+        self.store.data["recurring"][0]["made"] = ["2026-11", "2026-12", "2027-1"]   # 한 자리 월도 같은 달
+        self.assertEqual(self.made("2027-01-31"), [])
+
+    def test_until_before_day_waits(self):
+        self.add(day=15)
+        self.assertEqual(self.made("2026-11-14"), [])   # 아직 그날이 아님 → made 에도 안 넣음
+        self.assertEqual(self.store.data["recurring"][0]["made"], [])
+        self.assertEqual(self.made("2026-11-15"), [("2026-11-15", 1)])   # 그날 포함
+        self.assertEqual(self.made("2026-10-31"), [])   # start 보다 이른 until
+
+    def test_ids_in_date_order(self):
+        self.add(day=20)
+        self.add(day=5)
+        self.assertEqual(self.made("2026-12-31"), [("2026-11-05", 2), ("2026-11-20", 1),
+                                                   ("2026-12-05", 2), ("2026-12-20", 1)])
+        self.assertEqual([e["id"] for e in self.store.data["expenses"]], [1, 2, 3, 4])
+
+    def test_locked_month_skipped(self):
+        self.add()
+        self.store.data["locks"] = [{"start": "2026-12-01", "end": "2026-12-31"}]
+        created, skipped = settle.run_recurring_report(self.store, "2027-01-31")
+        self.assertEqual([e["date"] for e in created], ["2026-11-30", "2027-01-31"])
+        self.assertEqual(skipped, [(1, "2026-12", "정산이 확정된 기간입니다: 2026-12-31")])
+        self.assertEqual(self.store.data["recurring"][0]["made"], ["2026-11", "2027-01"])   # 12월은 남김
+
+    def test_left_member_month_skipped(self):
+        self.add()
+        self.store.member(self.PARK)["left"] = "2026-12-15"   # 탈퇴일 당일까지 회원(규약 4)
+        created, skipped = settle.run_recurring_report(self.store, "2026-12-31")
+        self.assertEqual([e["date"] for e in created], ["2026-11-30"])
+        self.assertEqual(skipped, [(1, "2026-12", f"그날 회원이 아닙니다: {self.PARK} (2026-12-31)")])
+
+    def test_old_and_broken_recurring(self):
+        for value in (None,):
+            self.store.data["recurring"] = value
+            self.assertEqual(settle.run_recurring(self.store, "2026-11-30"), [])
+            self.assertEqual(self.add()["id"], 1)
+        del self.store.data["recurring"]
+        self.assertEqual(settle.run_recurring(self.store, "2026-11-30"), [])
+        good = dict(RecurringFormatTest.R, made=[])
+        no_payer = {k: v for k, v in good.items() if k != "payer"}
+        no_amount = {k: v for k, v in good.items() if k != "amount"}
+        for broken in ({}, [good, {**good, "day": 0}], [good, {**good, "start": "11월"}], [good, "x"],
+                       [good, {**good, "made": "2026-11"}], [good, {**good, "id": "1"}], [good, no_payer],
+                       [good, no_amount], [good, {**good, "members": "김민수"}], [good, {**good, "category": 5}]):
+            self.store.data["recurring"] = broken
+            with self.assertRaisesRegex(ValueError, "recurring 형식|번째 반복 지출이 잘못"):
+                settle.run_recurring(self.store, "2026-11-30")
+            self.assertEqual(self.store.data["expenses"], [])   # 깨진 항목이 있으면 하나도 만들지 않음
+
+    def test_commands(self):
+        out = []
+        self.assertTrue(settle_cmd.run("recurring-add", self._args(day=31, payer=self.KIM, amount="300,000",
+                                       members=";".join(self.ALL), memo="정기 대관료", start="2026-11"),
+                                       {}, self.store, out.append))
+        self.assertEqual(out, ["반복 지출 등록 1번: 매달 31일 김민수 300,000원 (3명) 정기 대관료, 2026-11부터 "
+                               "(그달에 없는 날은 말일, settle recurring-run 으로 만듦)"])
+        self.store.data["locks"] = [{"start": "2026-12-01", "end": "2026-12-31"}]
+        out.clear()
+        self.assertTrue(settle_cmd.run("recurring-run", self._args(until="2026-12-31"), {}, self.store, out.append))
+        self.assertEqual(out, ["반복 지출 만듦 1번: 2026-11-30 김민수 300,000원 (3명) 정기 대관료 (반복 1번)",
+                               "건너뜀: 반복 1번 2026-12 (정산이 확정된 기간입니다: 2026-12-31)",
+                               "반복 지출 1건을 만들었습니다"])
+        out.clear()
+        self.assertFalse(settle_cmd.run("recurring-run", self._args(until="2026-11-30"), {}, self.store, out.append))
+        self.assertEqual(out, ["새로 만들 반복 지출이 없습니다"])   # 바꾼 것 없음 → 저장 안 함
+
+    def test_cli_parses_and_saves(self):
+        self.store.save()
+        config = self.path("config.json")
+        with open(config, "w", encoding="utf-8") as f:
+            json.dump({"data": self.store.path}, f)
+        lines = []
+        for argv in (["recurring-add", "31", self.KIM, "300000", "김민수;이서연", "--start", "2026-11"],
+                     ["recurring-run", "--until", "2026-11-30"]):
+            self.assertEqual(cli.main(["--config", config, "settle", *argv], out=lines.append), 0)
+        self.assertEqual(lines[-1], "반복 지출 1건을 만들었습니다")
+        saved = Store(self.store.path).load().data
+        self.assertEqual(saved["recurring"][0]["made"], ["2026-11"])
+        self.assertEqual(saved["expenses"][0]["recurring_id"], 1)
+
+    @staticmethod
+    def _args(**kw):
+        return argparse.Namespace(**kw)
