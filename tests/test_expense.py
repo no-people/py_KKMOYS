@@ -679,6 +679,67 @@ class TestAddExpense(StoreCase):
         self.assertEqual((e["payer"], e["members"], e["amount"]), ("김민수", ["이서연"], 1235))
 
 
+class TestHistoryQuery(StoreCase):
+    """history(store, eid=None): 기록 순서, 지출별 거르기, 복사본, 옛 자료·깨진 자료."""
+
+    def setUp(self):
+        super().setUp()
+        from moim.features import expenses
+        self.ex = expenses
+        self.e1, _ = expenses.add_expense(self.store, "2026-11-12", "김민수", 36000, ["김민수", "이서연"])
+        self.e2, _ = expenses.add_expense(self.store, "2026-11-13", "이서연", 9000, ["이서연", "박지훈"])
+        expenses.edit_expense(self.store, 1, amount=30000)
+        expenses.delete_expense(self.store, 2)
+        expenses.restore_expense(self.store, 2)
+
+    def test_all_in_recorded_order(self):
+        items = self.ex.history(self.store)
+        self.assertEqual([(h["id"], h["action"]) for h in items],
+                         [(1, "add"), (2, "add"), (1, "edit"), (2, "delete"), (2, "restore")])
+        for h in items:
+            self.assertRegex(h["at"], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")
+
+    def test_filter_by_id_shows_what_changed(self):
+        items = self.ex.history(self.store, 1)
+        self.assertEqual([h["action"] for h in items], ["add", "edit"])
+        self.assertIsNone(items[0]["before"])
+        self.assertEqual((items[1]["before"]["amount"], items[1]["after"]["amount"]), (36000, 30000))
+        self.assertEqual([h["action"] for h in self.ex.history(self.store, "2")], ["add", "delete", "restore"])
+
+    def test_deleted_expense_history_still_shown(self):
+        self.ex.delete_expense(self.store, 1)
+        self.assertEqual(self.ex.history(self.store, 1)[-1]["action"], "delete")
+
+    def test_returns_copy(self):
+        items = self.ex.history(self.store, 1)
+        items[1]["before"]["amount"] = 1
+        items.clear()
+        self.assertEqual(self.store.data["history"][2]["before"]["amount"], 36000)
+        self.assertEqual(len(self.store.data["history"]), 5)
+
+    def test_unknown_id_raises(self):
+        for eid in (3, 0, -1):
+            with self.assertRaises(ValueError):
+                self.ex.history(self.store, eid)
+
+    def test_old_data_without_history(self):
+        for value in ("missing", None, []):
+            if value == "missing":
+                self.store.data.pop("history")
+            else:
+                self.store.data["history"] = value
+            self.assertEqual(self.ex.history(self.store), [])
+            self.assertEqual(self.ex.history(self.store, 1), [])
+
+    def test_broken_history_raises(self):
+        good = self.store.data["history"][0]
+        for broken in ("깨짐", {}, "", 0, ["junk", good], [good, None]):
+            self.store.data["history"] = broken
+            for eid in (None, 1):   # 전체·번호별 모두 같은 오류(Store.record 와 같은 기준)
+                with self.assertRaises(ValueError):
+                    self.ex.history(self.store, eid)
+
+
 class TestAddFromFile(StoreCase):
     """add_from_file·import_lines: 줄 형식, 건너뛰는 줄, 잘못된 줄 모으기, add_expense 와 같은 검사·경고."""
 

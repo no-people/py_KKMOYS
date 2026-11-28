@@ -1,4 +1,4 @@
-"""명령 exp — add·list·edit·delete·restore·import-lines. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
+"""명령 exp — add·list·edit·delete·restore·history·import-lines. cli.run(parse_args(...)) 으로 실행한다. 기본 명부: 김민수·이서연·박지훈."""
 
 import copy
 import os
@@ -254,6 +254,64 @@ class TestExpenseCommand(StoreCase):
         self.assertEqual(str(cm.exception), "정산이 확정된 기간입니다: 2026-11-12")
         self.assertTrue(self.expenses()[0]["deleted"])
 
+    # --- history
+    def test_history_table(self):
+        self.add("2026-11-12", "김민수", "36,000", "김민수;이서연", "--memo", "저녁")
+        self.cmd("edit", "1", "--amount", "30000", "--memo", "회의 후 저녁")
+        self.cmd("delete", "1")
+        changed, lines = self.cmd("history")
+        self.assertFalse(changed)
+        rows = lines[0].splitlines()   # 표는 한 번에 출력
+        self.assertEqual(rows[0].split(), ["시각", "번호", "동작", "바뀐", "내용"])
+        self.assertTrue(set(rows[1]) <= {"-", " "})   # textfmt.table 구분선
+        self.assertIn("추가  새 지출: 2026-11-12 김민수 36,000원 (2명)", rows[2])
+        self.assertIn("수정  금액: 36,000원 → 30,000원; 메모: 저녁 → 회의 후 저녁", rows[3])
+        self.assertIn("삭제  삭제: 아니오 → 예", rows[4])
+        self.assertEqual(lines[-1], "모두 3건")
+
+    def test_history_by_id(self):
+        self.add()
+        self.add("2026-11-13", "이서연", "9000", "이서연;박지훈")
+        self.cmd("edit", "2", "--members", "이서연")
+        changed, lines = self.cmd("history", "2")
+        rows = lines[0].splitlines()
+        self.assertEqual(len(rows), 4)
+        self.assertTrue(all(r.split()[2] == "2" for r in rows[2:]))
+        self.assertIn("참여자: 이서연;박지훈 → 이서연", rows[3])
+        self.assertEqual(lines[-1], "모두 2건")
+
+    def test_history_empty_and_same_value_edit(self):
+        self.assertEqual(self.cmd("history"), (False, ["이력이 없습니다"]))
+        self.add()
+        self.cmd("edit", "1", "--memo", "")
+        self.assertIn("수정  바뀐 항목 없음", self.cmd("history", "1")[1][0])
+
+    def test_history_other_actions(self):
+        from moim.common import ledger
+        self.add()
+        self.cmd("delete", "1")
+        self.cmd("restore", "1")
+        ledger.insert(self.store, "2026-11-13", "이서연", 5000, ["이서연"], action="bank")
+        self.store.data["history"].append({"id": 2, "action": "edit", "at": "2026-11-28 10:00:00",
+                                           "before": {"id": 2}, "after": {"id": 2, "category_fixed": True}})
+        self.store.data["history"].append({"id": 2, "action": "add", "at": "2026-11-28 10:00:01",
+                                           "before": None, "after": {"id": 2}})   # 키가 빠진 자료
+        rows = self.cmd("history")[1][0].splitlines()
+        self.assertIn("되살림  삭제: 예 → 아니오", rows[4])
+        self.assertIn("은행    새 지출: 2026-11-13 이서연 5,000원 (1명)", rows[5])
+        self.assertIn("분류 고정: 아니오 → 예", rows[6])
+        self.assertTrue(rows[7].endswith("추가    -"))
+
+    def test_history_unknown_id_and_old_data(self):
+        from moim import cli
+        self.add()
+        with self.assertRaises(ValueError):
+            self.cmd("history", "9")
+        self.store.data["history"] = None   # 옛 자료
+        self.assertEqual(self.cmd("history", "1"), (False, ["이력이 없습니다"]))
+        with self.assertRaises(cli.UsageError):
+            cli.build_parser().parse_args(["exp", "history", "x"])
+
     # --- import-lines
     def write(self, text):
         p = self.path("lines.csv")
@@ -297,7 +355,7 @@ class TestExpenseCommand(StoreCase):
     def test_no_subcommand(self):
         changed, lines = self.cmd()
         self.assertFalse(changed)
-        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore, import-lines"))
+        self.assertTrue(lines[0].startswith("하위 명령을 지정하십시오: exp add, list, edit, delete, restore, history, import-lines"))
 
 
 if __name__ == "__main__":

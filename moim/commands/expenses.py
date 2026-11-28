@@ -10,7 +10,7 @@ import copy
 from ..common import dates, money
 from ..common.cliutil import _members, _period, _weights
 from ..common.queries import category_of
-from ..common.textfmt import pad, width
+from ..common.textfmt import pad, table, width
 from ..features import expenses
 
 GROUP = 'exp'
@@ -18,6 +18,10 @@ GROUP = 'exp'
 # 수정 결과에서 "전 → 후" 로 보여 줄 항목과 이름
 _FIELDS = (("date", "날짜"), ("payer", "낸 사람"), ("amount", "금액"), ("members", "참여자"),
            ("weights", "비율"), ("memo", "메모"), ("category", "분류"))
+# 이력 표에서 더 비교할 항목(수정 결과 화면에는 없는 상태 값)
+_STATE_FIELDS = (("deleted", "삭제"), ("category_fixed", "분류 고정"))
+_ACTIONS = {"add": "추가", "edit": "수정", "delete": "삭제", "restore": "되살림", "undo": "되돌림",
+            "exclude": "제외", "import": "가져오기", "bank": "은행", "recurring": "반복"}
 
 
 def add_parser(sub, period_args):
@@ -49,6 +53,9 @@ def add_parser(sub, period_args):
         s = grp.add_parser(name, help=h)
         s.add_argument("eid", type=int, help="지출 번호")
 
+    s = grp.add_parser("history", help="수정·삭제 이력(번호를 주면 그 지출만)")
+    s.add_argument("eid", type=int, nargs="?", help="지출 번호")
+
     s = grp.add_parser("import-lines", help="파일의 여러 줄을 한꺼번에 입력(UTF-8)")
     s.add_argument("path", help="한 줄 형식: 날짜,낸 사람,금액,참여자1;참여자2,메모 ('#' 줄·빈 줄 건너뜀)")
     return grp
@@ -63,12 +70,16 @@ def _parse_weights(text):
 
 def _show(key, value):
     """지출 항목 값을 화면에 보일 글자로 바꾼다."""
+    if value is None and key in ("amount", "members"):   # 이력 속 옛·손본 자료에 키가 없을 때
+        return "-"
     if key == "amount":
         return f"{money.fmt(value)}원"
     if key == "members":
         return ";".join(value)
     if key == "weights":
         return ";".join(f"{n}={w}" for n, w in value.items()) if value else "없음(똑같이 나눔)"
+    if isinstance(value, bool) or key in ("deleted", "category_fixed"):
+        return "예" if value else "아니오"   # 옛 지출에 키가 없으면(None) 아니오
     return "-" if value in (None, "") else str(value)
 
 
@@ -133,6 +144,33 @@ def _edit(args, store, out):
         out(f"경고: {w}")
 
 
+def _changes(h):
+    """이력 한 건에서 무엇이 어떻게 바뀌었는지 한 줄로."""
+    before, after = h.get("before"), h.get("after")
+    if not isinstance(after, dict):
+        return "-"
+    if not isinstance(before, dict):   # 추가·가져오기 등: 새로 생긴 지출
+        try:
+            return f"새 지출: {_summary(after)}"
+        except (KeyError, TypeError):   # 손으로 고친 자료 파일: 표 전체를 막지 않는다
+            return "-"
+    diffs = [f"{label}: {_show(key, before.get(key))} → {_show(key, after.get(key))}"
+             for key, label in _FIELDS + _STATE_FIELDS
+             if _show(key, before.get(key)) != _show(key, after.get(key))]
+    return "; ".join(diffs) or "바뀐 항목 없음"
+
+
+def _history(args, store, out):
+    items = expenses.history(store, args.eid)
+    if not items:
+        out("이력이 없습니다")
+        return
+    rows = [[h.get("at") or "-", str(h.get("id")), _ACTIONS.get(h.get("action"), str(h.get("action"))),
+             _changes(h)] for h in items]
+    out(table(["시각", "번호", "동작", "바뀐 내용"], rows))
+    out(f"모두 {len(items)}건")
+
+
 def _import_lines(args, store, out):
     added, errors, warnings = expenses.import_lines(store, args.path)
     if len(added) > 1 and added == list(range(added[0], added[-1] + 1)):
@@ -170,10 +208,13 @@ def run(c, args, cfg, store, out):
         e = expenses.restore_expense(store, args.eid)
         out(f"지출 되살림 {e['id']}번: {_summary(e)}")
         return True
+    if c == "history":
+        _history(args, store, out)
+        return False
     if c == "import-lines":
         return _import_lines(args, store, out)
     if c is None:
-        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, import-lines (도움말: python -m moim {GROUP} -h)")
+        out(f"하위 명령을 지정하십시오: {GROUP} add, list, edit, delete, restore, history, import-lines (도움말: python -m moim {GROUP} -h)")
         return False
     out(f"아직 만들지 않은 명령입니다: {GROUP} {c}")
     return False
